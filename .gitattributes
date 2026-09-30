@@ -1,0 +1,12 @@
+# Normalise line endings so a .bat or .ps1 in a release zip cannot arrive with LF-only endings.
+* text=auto eol=crlf
+
+*.cs   text diff=csharp
+*.csproj text
+*.ps1  text
+*.bat  text
+*.md   text
+*.txt  text
+
+*.png  binary
+*.zip  binary

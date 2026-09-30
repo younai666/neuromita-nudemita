@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>NeuroMita.HideSlots</AssemblyName>
+    <RootNamespace>NeuroMita.HideSlots</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Version>0.1.0</Version>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
+    <!--
+      This plugin touches no game types at all, only UnityEngine and BepInEx. That is why it
+      references far fewer assemblies than its siblings, and why it keeps working when the game's
+      own class layout changes.
+    -->
+  </PropertyGroup>
+
+  <!--
+    Game install path, same three sources as the sibling plugins:
+      1. dotnet build -p:GameDir="D:\Games\NeuroMita"
+      2. the NEUROMITA_DIR environment variable
+      3. a game.dir file at the repo root (contents = the path)
+  -->
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == '' AND '$(NEUROMITA_DIR)' != ''">$(NEUROMITA_DIR)</GameDir>
+    <GameDir Condition="'$(GameDir)' == '' AND Exists('$(MSBuildThisFileDirectory)..\..\game.dir')">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\..\game.dir').Trim())</GameDir>
+    <BepInExDir Condition="'$(BepInExDir)' == '' AND '$(GameDir)' != ''">$(GameDir)\BepInEx</BepInExDir>
+    <InteropDir Condition="'$(InteropDir)' == '' AND '$(BepInExDir)' != ''">$(BepInExDir)\interop</InteropDir>
+  </PropertyGroup>
+
+  <Target Name="RequireGameDir" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(GameDir)' == ''"
+           Text="GameDir is not set. Use -p:GameDir=&quot;...&quot;, set NEUROMITA_DIR, or create game.dir at the repo root." />
+    <Error Condition="!Exists('$(GameDir)')" Text="GameDir '$(GameDir)' does not exist." />
+    <Error Condition="!Exists('$(InteropDir)')"
+           Text="Interop assemblies not found at '$(InteropDir)'. Launch the game once with BepInEx installed." />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="BepInEx.Core">
+      <HintPath>$(BepInExDir)\core\BepInEx.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP">
+      <HintPath>$(BepInExDir)\core\BepInEx.Unity.IL2CPP.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(BepInExDir)\core\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(InteropDir)\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(InteropDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
