@@ -1,9 +1,8 @@
 <#
-    install.ps1 - copy NeuroMita.HideSlots.dll into a NeuroMita install.
+    install.ps1 - copy NeuroMita.NudeMita into a NeuroMita install.
 
-    This plugin is a companion to NeuroMita.CustomModels, so it does not install BepInEx: by the
-    time you want this plugin, BepInEx and the model installer are already in place. It only copies
-    one DLL and then checks that what this plugin depends on is actually there.
+    This plugin is self-contained: it reads the pack itself. It does not install BepInEx (install
+    that first), and it does not need any other model plugin.
 
     Usage:
         powershell -File install.ps1
@@ -28,7 +27,7 @@ function Resolve-GameDir([string]$candidate) {
     return $null
 }
 
-Write-Host "NeuroMita.HideSlots - installer" -ForegroundColor Cyan
+Write-Host "NeuroMita.NudeMita - installer" -ForegroundColor Cyan
 Write-Host ""
 
 # ---------- locate the game ----------
@@ -54,29 +53,39 @@ if (-not (Test-Path $plugins)) {
     New-Item -ItemType Directory -Path $plugins -Force | Out-Null
 }
 
-# ---------- copy ----------
-$dll = Join-Path $here 'BepInEx\plugins\NeuroMita.HideSlots.dll'
-if (-not (Test-Path $dll)) { $dll = Join-Path $here 'NeuroMita.HideSlots.dll' }
-if (-not (Test-Path $dll)) { throw "NeuroMita.HideSlots.dll not found next to this script." }
+# ---------- copy the plugin ----------
+$dlls = @(
+    'NeuroMita.NudeMita.dll',
+    'AssetsTools.NET.dll',
+    'AssetsTools.NET.Texture.dll',
+    'AssetRipper.TextureDecoder.dll'
+)
+$missing = @()
+foreach ($name in $dlls) {
+    $src = Join-Path $here "BepInEx\plugins\$name"
+    if (-not (Test-Path $src)) { $src = Join-Path $here $name }
+    if (-not (Test-Path $src)) { $missing += $name; continue }
+    Copy-Item $src $plugins -Force
+}
+if ($missing.Count -gt 0) { throw "these file(s) are not next to this script: $($missing -join ', ')" }
+Write-Host "installed: $($dlls.Count) file(s) -> $plugins" -ForegroundColor Green
 
-Copy-Item $dll $plugins -Force
-Write-Host "installed: $(Split-Path $dll -Leaf) -> $plugins" -ForegroundColor Green
-
-# ---------- check what this plugin needs ----------
-# Stated plainly because installing this alone produces a confusing result: the default Mita with
-# her clothing slots switched off, and no replacement body.
-$customModels = Join-Path $plugins 'NeuroMita.CustomModels.dll'
+# ---------- check the pack ----------
+# Stated plainly, because the plugin has nothing to install without it and the game will simply look
+# normal, which is a confusing way to find out.
+$pack = Join-Path $plugins 'mita_nude'
 Write-Host ""
-if (Test-Path $customModels) {
-    Write-Host "OK  : NeuroMita.CustomModels found, so there is a replacement body to finish." -ForegroundColor Green
+if (Test-Path $pack) {
+    Write-Host "OK  : the nude mod pack was found: $pack" -ForegroundColor Green
 } else {
-    Write-Warning ("NeuroMita.CustomModels.dll is NOT in BepInEx\plugins.")
-    Write-Host "      This plugin installs nothing by itself. Without the model installer there is no" -ForegroundColor Yellow
-    Write-Host "      replacement body, and all you will see is the default Mita with her clothing" -ForegroundColor Yellow
-    Write-Host "      slots hidden. Install CustomModels first, then the nude mod pack." -ForegroundColor Yellow
-    Write-Host "      https://github.com/younai666/neuromita-custom-models" -ForegroundColor Yellow
+    Write-Warning "the nude mod pack is NOT in BepInEx\plugins."
+    Write-Host "      This plugin is the loader and the fix-ups; the model itself is the pack." -ForegroundColor Yellow
+    Write-Host "      Download the nude mod and put its bundle at:" -ForegroundColor Yellow
+    Write-Host "          $pack" -ForegroundColor Yellow
+    Write-Host "      (a folder also works, as long as one file inside it is a UnityFS container;" -ForegroundColor Yellow
+    Write-Host "       point General.PackPath in the config elsewhere if you prefer another location.)" -ForegroundColor Yellow
 }
 
 Write-Host ""
-Write-Host "Launch the game once to generate BepInEx\config\neuromita.hideslots.cfg" -ForegroundColor Cyan
+Write-Host "Launch the game once to generate BepInEx\config\neuromita.nudemita.cfg" -ForegroundColor Cyan
 Read-Host "Press Enter to close"

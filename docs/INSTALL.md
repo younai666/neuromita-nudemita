@@ -1,50 +1,53 @@
-# Installing NeuroMita.HideSlots
+# Installing NeuroMita.NudeMita
 
-## Before you start
+## What you need
 
-This plugin is a **companion** to
-[NeuroMita.CustomModels](https://github.com/younai666/neuromita-custom-models). It installs nothing
-of its own — it only tidies up the scene after a replacement pack has been installed.
+1. **BepInEx 6.0.0-be.788** (or newer) installed in the game. Older builds cannot read this game's
+   `metadata v39`, and nothing here works without it.
+2. **The nude mod pack.** This plugin is the loader and the fix-ups; the model itself is the pack.
+   It is somebody else's work and is not redistributed with this plugin. Download it and put it at:
 
-Install in this order:
+   ```
+   <game>\BepInEx\plugins\mita_nude
+   ```
 
-1. **BepInEx 6.0.0-be.788** (or newer). Older builds cannot read this game's `metadata v39`.
-2. **NeuroMita.CustomModels** — this is what actually installs model packs.
-3. **The pack you want** (for example the MiSide nude mod), placed where CustomModels expects it.
-4. **NeuroMita.HideSlots** — this plugin.
+   A folder also works, as long as one file inside it is a `UnityFS` container. If you would rather
+   keep it somewhere else, set `General.PackPath` in the config to that path afterwards.
 
-Skipping step 2 or 3 gives a confusing result: the default Mita with her clothing slots switched
-off, and no replacement body. If that is what you are seeing, this is why.
+No other model plugin is involved. This one reads the pack itself.
 
 ## Install
 
 ### One-click
 
-Extract the release zip and run **`install.bat`**. It will:
+Extract the release zip into the game folder — the one holding `NeuroMita.exe` — and run
+**`install.bat`**. It will:
 
 * find the game (or accept a game folder dragged onto it),
-* copy `NeuroMita.HideSlots.dll` into `BepInEx\plugins`,
-* check whether `NeuroMita.CustomModels.dll` is present and warn you clearly if it is not.
+* copy `NeuroMita.NudeMita.dll` and the three assemblies it needs into `BepInEx\plugins`,
+* tell you whether the pack is where it expects it.
 
 ### Manual
 
-Copy `BepInEx\plugins\NeuroMita.HideSlots.dll` from the zip into your game's `BepInEx\plugins`
-folder. That single file is the whole plugin. There is no native library and no other managed
-dependency.
+Copy these four files from `BepInEx\plugins` in the zip into the game's `BepInEx\plugins` folder:
+
+```
+NeuroMita.NudeMita.dll
+AssetsTools.NET.dll
+AssetsTools.NET.Texture.dll
+AssetRipper.TextureDecoder.dll
+```
+
+Nothing else. There is no native library.
 
 ## First run
 
-Launch the game once. The plugin writes `BepInEx\config\neuromita.hideslots.cfg` with defaults that
-work for the naked-body case:
+Launch the game once. The plugin writes `BepInEx\config\neuromita.nudemita.cfg`:
 
 ```ini
 [General]
 Enabled = true
-Characters = Mita Crazy, Mita Cappie, Mita Cappy, Mita Kind, Mita Dream, Mita Sleepy, Mita ShortHair
-HideRenderers = Sweater, SweaterSlot, Skirt, SkirtSlot, Shoes, ShoesSlot, Pantyhose, PantyhoseSlot
-TextureOverrides = Body=body_nsfw, BodySlot=body_nsfw
-MeshSplit = Body = 320, 30471, 40 = -, body_nsfw, Body ; BodySlot = 320, 30471, 40 = -, body_nsfw, Body
-RebindBones =
+PackPath = mita_nude
 
 [Diagnostics]
 Verbose = true
@@ -54,67 +57,45 @@ DumpScene = false
 Check `BepInEx\LogOutput.log`:
 
 ```
-[Hide] ===== NeuroMita.HideSlots 0.2.0 =====
-[Hide] runtime attached
-[Hide] 81/135 renderer(s) in scope for 7 character fragment(s)
-[Hide] hid 'SweaterSlot' at MenuGame/Scene/Mitas/Mita Crazy/MitaPerson Mita/Slots/SweaterSlot
-[Hide] textured 'BodySlot' slot(s) 0..0 with 'body_nsfw' (2048x2048) at MenuGame/.../Slots/BodySlot
+[Nude] ===== NeuroMita.NudeMita 0.1.0 =====
+[Nude] opening pack: ...\BepInEx\plugins\mita_nude
+[Nude] pack ready: 3 part(s), 3 texture(s)
+[Nude]   part 'Body' (17824 verts, 180 bones)
+[Nude] 81/135 renderer(s) in scope for 7 character fragment(s)
+[Nude] MenuGame/Scene/Mitas/Mita Crazy/MitaPerson Mita/Slots/BodySlot: part='Body' ok=True bones=180 missing=5 align=[Right toe/Head/Right Eye] residual=0.0001
+[Nude] hid 'SweaterSlot' at MenuGame/.../Slots/SweaterSlot
+[Nude] split 'BodySlot' into 3 part(s) [320, 30471, 40] tris at MenuGame/.../Slots/BodySlot
 ```
 
-The scope line is the one to read first. `0/135` means your `Characters` fragments matched nothing
-and nothing will happen; a number close to the total means the fragments are too broad.
+Fifteen renderers get installed and split: five Mitas, each of which the game presents in three
+places at once.
 
-`texture 'body_nsfw' not loaded yet` early in the log is normal: the pack's textures arrive when
-CustomModels finishes installing the pack, and the override retries on the next scan (every 2
-seconds) until it finds them.
+## Reading the log
 
-> BepInEx never overwrites an existing config file. If you update the plugin's defaults, delete
-> `neuromita.hideslots.cfg` to see them.
+| Line | Meaning |
+|---|---|
+| `the nude mod pack was not found` | Put the pack where the installer says, or set `General.PackPath`. |
+| `pack ready: 3 part(s), 3 texture(s)` | The container was read successfully. |
+| `ok=True … residual=0.0001` | The pack's rest pose was aligned to this character. `residual` above roughly `0.02` means the pack was built on a different rig and is refused. |
+| `split 'BodySlot' into 3 part(s)` | The pack's submesh boundaries were restored. |
+| `has N triangles, not the pack's 30831` | This renderer does not carry the pack's body yet. Expected before the install lands, and it retries every 2 seconds. |
+| `T/N renderer(s) in scope` | How much of the scene the plugin is allowed to touch. `0/N` means something is wrong; near `N` would mean the character fragments matched everything. |
 
-## Tuning
+## The one diagnostic worth knowing
 
-### Finding the right names
-
-Turn on `Diagnostics.DumpScene = true` and restart. The log then lists every renderer in the scene,
-six times at 15-second intervals, like this:
+If the body looks **stretched or torn** rather than merely wrong-coloured, set
+`Diagnostics.DumpScene = true` and search the log for the character in question:
 
 ```
-[Dump] 'BodySlot' enabled=True subMeshes=1 slots=1 path=MitaCore (Start)/Mitas/Mita Crazy/MitaPerson Mita/Slots/BodySlot
-[Dump]      slot0 mat='Body' shader='RealToon/Version 5/Default/Default' albedo='Cloth'(2048x2048)
+[Dump] 'BodySlot' enabled=True subMeshes=3 slots=3 bones=180 bindposes=180 mesh='Body_aligned' … bounds=0.64x1.67x0.62 … path=MitaCore (Start)/Mitas/Mita Dream/…
 ```
 
-That gives you the exact path (for `Characters`), the exact renderer name (for `HideRenderers`), the
-submesh count and the slot count (for `TextureOverrides`), and the texture names that are actually
-loaded (for the `=Texture` side).
-
-Turn it back off when you are done — it is verbose by design.
-
-### Adding a character
-
-Add a **path fragment** to `Characters`. Fragments are matched case-insensitively against the full
-transform path, so `Mita Mila` covers every instance of Mila in one go, and `Mita Crazy` covers both
-`Mita Crazy` and `Mita Crazy _legacy`.
-
-To include the player, use `ViewRoot/Person`.
-
-### Changing which parts are hidden
-
-Turn on `Diagnostics.Verbose` and read the `in scope` list. Exact names, `*` allowed for wildcards.
-
-### Changing a texture
-
-`Renderer[slots]=Texture`. The texture must already be loaded; this plugin cannot read one out of a
-pack. Check the `albedo=` values in the dump for names that exist.
-
-If the log says a slot is **past the mesh's submesh count**, that slot is never drawn — the override
-is a no-op and you want a lower slot number. Read `subMeshes=` from the dump.
-
-### Turning it off
-
-`Enabled = false`, or clear `HideRenderers` and `TextureOverrides` independently.
+A healthy body is about `0.7 x 1.7 x 0.7` at a scale of `1.000`. Bounds near `3 x 3 x 3` mean the
+mesh is bound against the wrong bones — a binding problem, not a modelling one — and the values are
+worth reporting.
 
 ## Uninstalling
 
-Delete `BepInEx\plugins\NeuroMita.HideSlots.dll` and optionally
-`BepInEx\config\neuromita.hideslots.cfg`. Nothing else on disk is touched, and no game file is ever
-modified.
+Delete `NeuroMita.NudeMita.dll` and the three `AssetsTools*` / `AssetRipper*` assemblies from
+`BepInEx\plugins`, and optionally `BepInEx\config\neuromita.nudemita.cfg`. The pack can stay or go.
+Nothing on disk is modified and no game file is touched.

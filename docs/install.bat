@@ -1,15 +1,13 @@
 @echo off
 rem ---------------------------------------------------------------------------
-rem  NeuroMita.HideSlots - one-click installer
+rem  NeuroMita.NudeMita - one-click installer
 rem
 rem  Double-click this file. It copies the plugin into BepInEx\plugins and then
-rem  checks that NeuroMita.CustomModels is present, which this plugin needs in
-rem  order to do anything visible.
+rem  checks that the nude mod pack is in place, which is the model itself.
 rem
 rem  You can also drag the game folder (or NeuroMita.exe) onto this file.
 rem
-rem  BepInEx is not installed by this script: this is a companion plugin, so it
-rem  assumes the model installer is already set up.
+rem  BepInEx is not installed by this script: install that first.
 rem ---------------------------------------------------------------------------
 
 setlocal

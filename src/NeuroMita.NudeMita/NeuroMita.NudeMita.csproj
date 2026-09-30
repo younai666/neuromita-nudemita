@@ -2,26 +2,24 @@
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-    <AssemblyName>NeuroMita.HideSlots</AssemblyName>
-    <RootNamespace>NeuroMita.HideSlots</RootNamespace>
+    <AssemblyName>NeuroMita.NudeMita</AssemblyName>
+    <RootNamespace>NeuroMita.NudeMita</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <Version>0.3.0</Version>
+    <Version>0.1.0</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The container reader and its texture decoders are NuGet assemblies that have to end up
+         next to the plugin, so they must be copied to the output folder. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <NoWarn>$(NoWarn);CS0436</NoWarn>
-    <!--
-      This plugin touches no game types at all, only UnityEngine and BepInEx. That is why it
-      references far fewer assemblies than its siblings, and why it keeps working when the game's
-      own class layout changes.
-    -->
   </PropertyGroup>
 
   <!--
-    Game install path, same three sources as the sibling plugins:
+    Game install path, the same three sources the sibling plugins use:
       1. dotnet build -p:GameDir="D:\Games\NeuroMita"
       2. the NEUROMITA_DIR environment variable
-      3. a game.dir file at the repo root (contents = the path)
+      3. a game.dir file at the repo root
   -->
   <PropertyGroup>
     <GameDir Condition="'$(GameDir)' == '' AND '$(NEUROMITA_DIR)' != ''">$(NEUROMITA_DIR)</GameDir>
@@ -60,6 +58,21 @@
       <HintPath>$(InteropDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(InteropDir)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(InteropDir)\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Reading the game's own UnityFS containers. Unity's AssetBundle API is unusable on this
+       build, so the container is parsed directly and its textures decoded with these. -->
+  <ItemGroup>
+    <PackageReference Include="AssetsTools.NET" Version="3.0.5" />
+    <PackageReference Include="AssetsTools.NET.Texture" Version="3.0.2" />
   </ItemGroup>
 
 </Project>
