@@ -20,6 +20,66 @@ mean distorting every pack to fit one author's mistake.
 So CustomModels installs the part that fits, and this plugin hides the game's own clothing slots
 that are now redundant. Each plugin does the part it is actually responsible for.
 
+### The player is nude too. Was that a bug?
+
+Yes, in 0.1.0, and it is fixed in 0.2.0.
+
+The player's body renderer is literally named `Body`, the same as a Mita's. Version 0.1.0 applied
+texture overrides across the whole scene, so every object named `Body` in the world got the skin
+texture — the player, every Mita, and quest props.
+
+Overrides are now restricted to the characters named in `Characters`, matched against the object's
+**full transform path**. The player's path is `GameCore/…/Player/ViewRoot/Person/Body`, which
+contains none of the default fragments, so it is left alone.
+
+### Every Mita changed appearance, not just the one I installed. Was that a bug too?
+
+Same bug, same fix. A Mita's parts live under three different roots at once
+(`MenuGame/Scene/Mitas/…`, `…/Legacy/Mita X _legacy`, `MitaCore (Start)/Mitas/…`), and the old
+substring matching hit all of them plus the other characters.
+
+If you *want* every Mita, list every character fragment. If you want only some, list only those —
+`Characters` is the whole control.
+
+### Nothing happened at all. Where do I look?
+
+At the scope line:
+
+```
+[Hide] 81/135 renderer(s) in scope for 7 character fragment(s)
+```
+
+* `0/135` — your `Characters` fragments matched no transform path. Check spelling against a
+  `DumpScene` listing; remember the game's own names (`Mita Crazy _legacy`) are not the pack folder
+  names (`Crazy`).
+* A number near the total with `(no Characters set, whole scene allowed)` — you cleared
+  `Characters`, so everything is in scope. That is rarely intended.
+* Scope looks right but nothing is hidden — the renderer name may not match exactly. Matching is
+  exact and case-insensitive; use `*` for a wildcard.
+
+### The log says my texture slot is past the mesh's submesh count. What does that mean?
+
+It means that slot is never drawn, so the override does nothing — and it is the reason a texture
+change can look like it silently failed.
+
+A replacement mesh does not always have as many submeshes as the pack authored. The nude mod's
+`Body` has three submeshes in the bundle, but the installed mesh has **one**, so exactly one slot
+matters and it is slot 0. `Diagnostics.DumpScene = true` prints the real counts:
+
+```
+[Dump] 'BodySlot' enabled=True subMeshes=1 slots=1 path=…
+```
+
+Use `Body[0]=body_nsfw`, or drop the brackets to mean every slot.
+
+### The neck seam still looks wrong.
+
+The albedo is only part of it. This plugin writes **only** the albedo texture and deliberately
+leaves normal, metallic, occlusion, emission and outline maps alone: an earlier version set every
+texture property the shader declares to the same image, which corrupted shading and produced jagged
+outlines around the neck. If you still see a seam after 0.2.0, it is a modelling or UV problem in
+the pack, not a texture assignment this plugin can fix.
+
 ### The log says `texture 'body_nsfw' not loaded yet`. Is it broken?
 
 No. That message appears during the first scans, before CustomModels has finished installing the
@@ -27,62 +87,49 @@ pack and loading its textures. The override is retried on every scan (every 2 se
 texture appears. Confirmation looks like:
 
 ```
-[Hide] textured 'Body' with 'body_nsfw' (2048x2048, 1 material(s))
+[Hide] textured 'BodySlot' slot(s) 0..0 with 'body_nsfw' (2048x2048) at …
 ```
 
-If it never appears, the texture name in your config does not match any loaded texture — check the
-`shader '<name>' texture properties:` lines, or grep the log for the texture names CustomModels
-reported loading.
+If it never appears, no loaded texture has that name — check the `albedo=` values in a `DumpScene`
+listing.
 
 ### Why does `Characters` want `Mita Crazy` and not `Crazy`?
 
 They are two different naming systems:
 
-* `Crazy` is a **pack folder name**, used by CustomModels' routing.
-* `Mita Crazy` is the **scene object name** of the character.
+* `Crazy` is a **pack folder name**, used by CustomModels' routing and by nothing else.
+* `Mita Crazy` is part of the **transform path** of the character in the scene.
 
-This plugin looks up scene objects with `GameObject.Find`, so it wants the scene name. The mapping
-between the two lives in CustomModels' `Plugin.cs`, and this plugin deliberately knows nothing about
-it — that is why it has no dependency on CustomModels' code.
+This plugin knows nothing about CustomModels' routing table, which is why it has no code dependency
+on it.
 
-| Pack folder | Scene name |
+| Pack folder | Path fragment |
 |---|---|
 | `Crazy` | `Mita Crazy` |
+| `Cappie` / `Cappy` | `Mita Cappie`, `Mita Cappy` |
+| `Kind` | `Mita Kind` |
+| `Sleepy` / `Dream` | `Mita Dream`, `Mita Sleepy` |
 | `ShortHair` | `Mita ShortHair` |
-| `Sleepy` / `Dream` | `Mita Dream` |
-| `Player` | `Person` |
-
-### Nothing is being hidden. What should I check?
-
-1. `Diagnostics.Verbose = true` and read `LogOutput.log`. The plugin says what it found:
-   `[Hide] 20 renderer(s) in scope (scene-wide fallback)` and then each renderer it lists.
-2. If it lists nothing, your `Characters` value matched no GameObject. The log says
-   `(scene-wide fallback)` when the character lookup failed and it fell back to scanning everything.
-3. Renderer names are matched as **case-insensitive substrings**, so `Skirt` matches `SkirtSlot`.
-4. A renderer the game has already disabled is skipped on purpose and will not be reported as
-   hidden. Check the `enabled=` value in the verbose listing.
+| `Mila` | `Mita Mila` |
+| `Ghost` | `Mita Ghost` |
+| *(player)* | `ViewRoot/Person` |
 
 ### The texture override does nothing.
 
-Almost always because it matched the **game's original renderer** rather than the replacement:
+Check, in order:
 
-* the installer creates a **new** object named after the mesh (`Body`) and **disables** the original
-  (`BodySlot`);
-* a name that only matches the disabled original changes nothing you can see.
-
-Overrides are therefore applied scene-wide and skip disabled renderers. Point the override at the
-name of the object that is actually visible — the verbose listing shows which are `enabled=true`.
+1. Is the renderer name matched **exactly**? `Body` will not match `BodySlot`.
+2. Is the renderer inside one of your `Characters` paths?
+3. Is the slot one that is actually drawn? See the slot question above.
+4. Is the renderer disabled? Disabled renderers are skipped on purpose — the installer creates a new
+   object and disables the original, and a name that only hits the disabled original changes nothing
+   you can see.
 
 ### Does it work for packs that are not the nude mod?
 
 Yes, it is config-driven and has nothing specific to any one mod in it. It is useful for any
 **partial** replacement: a pack that replaces a body but not the clothes, or a hair pack that
-replaces hair but leaves the original hair mesh visible underneath. Point `HideRenderers` at
-whatever is now redundant.
-
-### Can it hide things on the player?
-
-Yes. The player's scene object is called `Person`, so `Characters = Person`.
+replaces hair but leaves the original hair mesh visible underneath.
 
 ### Does it conflict with CustomModels or other plugins?
 

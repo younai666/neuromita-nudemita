@@ -34,52 +34,82 @@ dependency.
 
 ## First run
 
-Launch the game once. The plugin writes `BepInEx\config\neuromita.hideslots.cfg` with working
-defaults for the naked-body case:
+Launch the game once. The plugin writes `BepInEx\config\neuromita.hideslots.cfg` with defaults that
+work for the naked-body case:
 
 ```ini
 [General]
 Enabled = true
-Characters = Mita Crazy
-HideRenderers = SweaterSlot, SkirtSlot, PantyhoseSlot, ShoesSlot
-TextureOverrides = Body=body_nsfw
+Characters = Mita Crazy, Mita Cappie, Mita Cappy, Mita Kind, Mita Dream, Mita Sleepy, Mita ShortHair
+HideRenderers = Sweater, SweaterSlot, Skirt, SkirtSlot, Shoes, ShoesSlot, Pantyhose, PantyhoseSlot
+TextureOverrides = Body=body_nsfw, BodySlot=body_nsfw
 
 [Diagnostics]
 Verbose = true
+DumpScene = false
 ```
 
 Check `BepInEx\LogOutput.log`:
 
 ```
-[Hide] ===== NeuroMita.HideSlots 0.1.0 =====
+[Hide] ===== NeuroMita.HideSlots 0.2.0 =====
 [Hide] runtime attached
-[Hide] 20 renderer(s) in scope (scene-wide fallback)
-[Hide] hid 'SweaterSlot' under 'Mita Crazy'
-[Hide] textured 'Body' with 'body_nsfw' (2048x2048, 1 material(s))
+[Hide] 81/135 renderer(s) in scope for 7 character fragment(s)
+[Hide] hid 'SweaterSlot' at MenuGame/Scene/Mitas/Mita Crazy/MitaPerson Mita/Slots/SweaterSlot
+[Hide] textured 'BodySlot' slot(s) 0..0 with 'body_nsfw' (2048x2048) at MenuGame/.../Slots/BodySlot
 ```
+
+The scope line is the one to read first. `0/135` means your `Characters` fragments matched nothing
+and nothing will happen; a number close to the total means the fragments are too broad.
 
 `texture 'body_nsfw' not loaded yet` early in the log is normal: the pack's textures arrive when
 CustomModels finishes installing the pack, and the override retries on the next scan (every 2
 seconds) until it finds them.
 
-## Tuning
-
-**A different character.** Set `Characters` to that character's **scene** name — `Mita Dream`,
-`Mita ShortHair`, `Person` for the player — not the pack folder name.
-
-**Different slots.** Turn on `Diagnostics.Verbose` and read the list the plugin prints. The real
-names are `Head`, `FaceLayer`, `Hairs`, `SweaterSlot`, `SkirtSlot`, `ShoesSlot`, `PantyhoseSlot`,
-`BodySlot`, `AttributeSlot`.
-
-**A different texture.** Set `TextureOverrides` to `RendererName=TextureName`. The texture must
-already be loaded into memory; this plugin cannot read it out of a pack. Look for the name in the
-`shader '<name>' texture properties:` lines in the log.
-
-**Turn it off.** Set `Enabled = false`, or clear `HideRenderers` and `TextureOverrides`
-independently.
-
 > BepInEx never overwrites an existing config file. If you update the plugin's defaults, delete
 > `neuromita.hideslots.cfg` to see them.
+
+## Tuning
+
+### Finding the right names
+
+Turn on `Diagnostics.DumpScene = true` and restart. The log then lists every renderer in the scene,
+six times at 15-second intervals, like this:
+
+```
+[Dump] 'BodySlot' enabled=True subMeshes=1 slots=1 path=MitaCore (Start)/Mitas/Mita Crazy/MitaPerson Mita/Slots/BodySlot
+[Dump]      slot0 mat='Body' shader='RealToon/Version 5/Default/Default' albedo='Cloth'(2048x2048)
+```
+
+That gives you the exact path (for `Characters`), the exact renderer name (for `HideRenderers`), the
+submesh count and the slot count (for `TextureOverrides`), and the texture names that are actually
+loaded (for the `=Texture` side).
+
+Turn it back off when you are done — it is verbose by design.
+
+### Adding a character
+
+Add a **path fragment** to `Characters`. Fragments are matched case-insensitively against the full
+transform path, so `Mita Mila` covers every instance of Mila in one go, and `Mita Crazy` covers both
+`Mita Crazy` and `Mita Crazy _legacy`.
+
+To include the player, use `ViewRoot/Person`.
+
+### Changing which parts are hidden
+
+Turn on `Diagnostics.Verbose` and read the `in scope` list. Exact names, `*` allowed for wildcards.
+
+### Changing a texture
+
+`Renderer[slots]=Texture`. The texture must already be loaded; this plugin cannot read one out of a
+pack. Check the `albedo=` values in the dump for names that exist.
+
+If the log says a slot is **past the mesh's submesh count**, that slot is never drawn — the override
+is a no-op and you want a lower slot number. Read `subMeshes=` from the dump.
+
+### Turning it off
+
+`Enabled = false`, or clear `HideRenderers` and `TextureOverrides` independently.
 
 ## Uninstalling
 

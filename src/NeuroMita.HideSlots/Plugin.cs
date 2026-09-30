@@ -11,32 +11,35 @@ using UnityEngine;
 namespace NeuroMita.HideSlots
 {
     /// <summary>
-    /// Hide named SkinnedMeshRenderers on named characters.
+    /// Hide named SkinnedMeshRenderers on named characters, and re-point a renderer's albedo at a
+    /// texture that is already loaded.
     ///
     /// Why this exists as its own plugin: replacement packs can cover only part of a character.
     /// The "Mita Nude Mod" for MiSide, for example, ships Body / Top / Bottom where only Body
     /// aligns with the game skeleton -- its Top and Bottom carry a 1.35 non-unit scale baked into
-    /// their bindposes, so they cannot be fitted. The plugin installs Body, leaves the game's own
-    /// clothing renderers alone, and the result is a naked mesh wearing its original clothes.
+    /// their bindposes, so they cannot be fitted. The installer therefore installs Body, leaves the
+    /// game's own clothing renderers alone, and the result is a naked mesh wearing its original
+    /// clothes.
     ///
-    /// That is a modelling problem in the pack, not something the CustomModels plugin should paper
-    /// over by changing how every pack installs. This plugin just hides the slots you name, which
-    /// is exactly what a partial replacement needs.
+    /// That is a modelling problem in the pack, not something the model installer should paper over
+    /// by changing how every pack installs. This plugin does the two things the installer should
+    /// not: hide the slots you name, and name the texture the pack actually meant.
     ///
-    /// Config-driven on purpose: nothing about this is specific to any one mod.
+    /// Config-driven on purpose: nothing here is specific to any one mod.
     /// </summary>
     [BepInPlugin(Guid, PluginName, PluginVersion)]
     public class Plugin : BasePlugin
     {
         public const string Guid = "neuromita.hideslots";
         public const string PluginName = "NeuroMita.HideSlots";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.2.0";
 
         internal static ConfigEntry<bool> CfgEnabled;
         internal static ConfigEntry<string> CfgCharacters;
         internal static ConfigEntry<string> CfgRenderers;
         internal static ConfigEntry<string> CfgTextureOverrides;
         internal static ConfigEntry<bool> CfgVerbose;
+        internal static ConfigEntry<bool> CfgDumpScene;
         internal static ManualLogSource Log2;
 
         public override void Load()
@@ -46,38 +49,57 @@ namespace NeuroMita.HideSlots
             CfgEnabled = ConfigBind("General", "Enabled", true,
                 "Master switch.");
 
-            CfgCharacters = ConfigBind("General", "Characters", "Mita Crazy",
-                "Comma-separated GameObjects to look inside. Matched by name, case-insensitive " +
-                "substring -- 'Mita Crazy' also matches 'Mita Crazy(Clone)'. Leave empty to scan " +
-                "every SkinnedMeshRenderer in the scene, which is rarely what you want.");
+            CfgCharacters = ConfigBind("General", "Characters", Patcher.DefaultCharacters,
+                "Which characters this plugin may touch, as comma-separated FRAGMENTS of the " +
+                "transform path. A renderer is in scope only when its full path contains one of " +
+                "these, case-insensitively.\n" +
+                "This is the setting that keeps the plugin off everything else. The player's body " +
+                "renderer is literally named 'Body' as well, and every Mita has one, so matching on " +
+                "the renderer name alone cannot tell them apart. The path can.\n" +
+                "Watch the game's own naming: 'Mita Crazy' (new-style, parts under 'Slots/') and " +
+                "'Mita Crazy _legacy' (parts directly on the character) are different objects, and a " +
+                "fragment matches both. Leave empty to allow the whole scene, which is almost never " +
+                "what you want.");
 
             CfgRenderers = ConfigBind("General", "HideRenderers",
-                "SweaterSlot, SkirtSlot, PantyhoseSlot, ShoesSlot",
-                "Comma-separated renderer names to hide, matched as case-insensitive substrings. " +
-                "The defaults are the game's own clothing slots, which is what a body-only " +
-                "replacement pack needs hidden so the new mesh is not worn under the old clothes. " +
-                "These are real names read out of a live scene, not guesses -- a Mita carries " +
-                "Head, FaceLayer, Hairs, SweaterSlot, SkirtSlot, ShoesSlot, PantyhoseSlot, " +
-                "BodySlot and AttributeSlot. Clear this to disable hiding entirely. " +
-                "Turn on Diagnostics.Verbose to have every renderer under the character listed " +
-                "with its exact name and current enabled state.");
+                "Sweater, SweaterSlot, Skirt, SkirtSlot, Shoes, ShoesSlot, Pantyhose, PantyhoseSlot",
+                "Comma-separated renderer names to disable, matched EXACTLY and case-insensitively " +
+                "('*' acts as a wildcard).\n" +
+                "Exact matching matters: a substring match on 'Body' also hits 'BodySlot', " +
+                "'BodyDark', 'BodyTowel', 'BodyTie1' and 'BodyTie2' -- five wrong renderers per " +
+                "character.\n" +
+                "Both spellings are listed because the game uses both: new-style Mitas carry " +
+                "SweaterSlot / SkirtSlot / ShoesSlot / PantyhoseSlot, legacy Mitas carry Sweater / " +
+                "Skirt / Shoes / Pantyhose. Clear this to disable hiding. Set " +
+                "Diagnostics.DumpScene to true to see every renderer with its path and materials.");
 
-            CfgTextureOverrides = ConfigBind("General", "TextureOverrides", "Body=body_nsfw",
-                "RendererName=TextureName pairs, comma-separated. Re-points a renderer's material " +
-                "at a texture that is already loaded in memory, by name. " +
-                "The MiSide nude mod is why this exists: its bundle holds 126 textures and the " +
-                "replacement plugin picks one by name heuristics, which lands on 'Cloth' for the " +
-                "body -- so the naked mesh renders in the sweater's colour. The texture the pack " +
-                "actually intends is called 'body_nsfw', and it is already loaded, so naming it " +
-                "here is enough. " +
-                "Match on the REPLACEMENT renderer, not the game's: the replacement plugin creates " +
-                "a new object named after the mesh ('Body') and disables the original ('BodySlot'), " +
-                "so a name that only hits the disabled original changes nothing you can see. " +
-                "Disabled renderers are skipped for that reason. Clear this to disable overrides.");
+            CfgTextureOverrides = ConfigBind("General", "TextureOverrides",
+                "Body=body_nsfw, BodySlot=body_nsfw",
+                "Renderer[slots]=Texture entries, comma-separated. Re-points a material slot's " +
+                "albedo at a texture that is already loaded, by name.\n" +
+                "Slot syntax: '[2]' one slot, '[0,2]' several, '[1..]' from 1 to the last, '[1..2]' " +
+                "a range. No brackets means every slot.\n" +
+                "The MiSide nude mod is why this exists. Its bundle holds 126 textures and the " +
+                "installer picks one per part by name heuristics, which lands on 'Cloth' for the " +
+                "body, so the naked mesh renders in the sweater's colour. The texture the pack " +
+                "actually means is 'body_nsfw', and it is already loaded, so naming it is enough.\n" +
+                "Only the albedo is rewritten. Setting every texture property a shader declares -- " +
+                "which an earlier version did -- writes a diffuse map into the normal, metallic, " +
+                "occlusion, emission and outline slots at once, and the visible damage is a broken " +
+                "seam and garbage outlines at the neck.\n" +
+                "Use the slot syntax when the replacement mesh has several submeshes: the installer " +
+                "can collapse a multi-material mesh into one, and then a single flat override is " +
+                "the only thing that will look right. DumpScene prints submesh and slot counts.");
 
             CfgVerbose = ConfigBind("Diagnostics", "Verbose", true,
-                "List every renderer found under a matched character, and say which ones were " +
-                "hidden. Turn off once you have the names you need.");
+                "Say what came into scope and what was changed. Turn off once it works.");
+
+            CfgDumpScene = ConfigBind("Diagnostics", "DumpScene", false,
+                "Log every SkinnedMeshRenderer in the scene, with its full transform path, its " +
+                "enabled state, its submesh count, and each material slot with the albedo texture " +
+                "it points at. This is how you find out what a replacement pack actually produced: " +
+                "its renderer is usually NOT parented under the character root, so a scoped listing " +
+                "never reaches it. Dumps six times, 15 seconds apart. Turn it off again after.");
 
             Log2.LogInfo($"[Hide] ===== {PluginName} {PluginVersion} =====");
 
@@ -98,154 +120,368 @@ namespace NeuroMita.HideSlots
             => Config.Bind(section, key, value, description);
     }
 
+    /// <summary>
+    /// The injected MonoBehaviour has to stay this thin.
+    ///
+    /// Il2CppInterop generates a wrapper for every method on a type registered into the il2cpp
+    /// domain, and it cannot marshal a <c>List&lt;T&gt;</c> parameter. Putting the logic here would
+    /// emit a wall of "has unsupported parameter" warnings on startup for methods nothing outside
+    /// managed code ever calls. A plain class is not wrapped, so the logic lives there instead.
+    /// </summary>
     public class HideRuntime : MonoBehaviour
     {
-        private readonly HashSet<int> _hidden = new HashSet<int>();
-        private float _nextScanAt;
+        private Patcher _patcher;
 
         private void Update()
         {
-            try
-            {
-                if (Time.time < _nextScanAt) return;
-                _nextScanAt = Time.time + 2f;
-                Scan();
-            }
+            if (_patcher == null) _patcher = new Patcher();
+            try { _patcher.Tick(); }
             catch (Exception e)
             {
                 Plugin.Log2.LogWarning($"[Hide] scan failed: {e.GetType().Name}: {e.Message}");
-                _nextScanAt = Time.time + 5f;
+                _patcher.BackOff();
             }
+        }
+    }
+
+    /// <summary>One parsed 'Renderer[slots]=Texture' entry.</summary>
+    internal class TexOverride
+    {
+        public string Raw;
+        public string NamePattern;
+        public string Texture;
+
+        /// <summary>True when the entry named no slots and therefore means every slot.</summary>
+        public bool AllSlots;
+
+        /// <summary>Explicit slot indices, when the entry listed them individually.</summary>
+        public int[] Indices;
+
+        public int From;
+        public int To = int.MaxValue;   // inclusive; MaxValue means "to the last slot"
+    }
+
+    /// <summary>All scan logic and state. Deliberately not a MonoBehaviour (see HideRuntime).</summary>
+    internal class Patcher
+    {
+        internal const string DefaultCharacters =
+            "Mita Crazy, Mita Cappie, Mita Cappy, Mita Kind, Mita Dream, Mita Sleepy, Mita ShortHair";
+
+        private const float RescanSeconds = 2f;
+
+        private readonly HashSet<string> _hid = new HashSet<string>();
+        private readonly HashSet<string> _textured = new HashSet<string>();
+        private readonly HashSet<int> _noted = new HashSet<int>();
+
+        private int _dumps;
+        private int _lastScopeSignature = int.MinValue;
+        private float _nextDumpAt;
+        private float _nextScanAt;
+
+        internal void BackOff() => _nextScanAt = Time.time + 5f;
+
+        internal void Tick()
+        {
+            if (Plugin.CfgDumpScene.Value && _dumps < 6 && Time.time >= _nextDumpAt)
+            {
+                _nextDumpAt = Time.time + 15f;
+                _dumps++;
+                DumpScene(_dumps);
+            }
+
+            if (Time.time < _nextScanAt) return;
+            _nextScanAt = Time.time + RescanSeconds;
+            Scan();
         }
 
         private void Scan()
         {
-            var rendererNames = Split(Plugin.CfgRenderers.Value);
-            if (rendererNames.Count == 0) return;
-            var characterNames = Split(Plugin.CfgCharacters.Value);
+            var characters = Split(Plugin.CfgCharacters.Value);
+            var hidePatterns = Split(Plugin.CfgRenderers.Value);
+            var overrides = ParseOverrides(Split(Plugin.CfgTextureOverrides.Value));
 
-            // Renderers reached by walking a named character root are already scoped -- they must
-            // NOT be filtered by owner name again, or a renderer sitting under a nested model root
-            // gets dropped even though it plainly belongs to that character.
-            var candidates = new List<(SkinnedMeshRenderer Smr, bool Scoped)>();
-            int scanned = 0;
+            if (hidePatterns.Count == 0 && overrides.Count == 0) return;
 
-            foreach (var characterName in characterNames)
-            {
-                GameObject root = null;
-                try { root = GameObject.Find(characterName); } catch { }
-                if (root == null) continue;
-
-                SkinnedMeshRenderer[] found = null;
-                try { found = root.GetComponentsInChildren<SkinnedMeshRenderer>(true); } catch { }
-                if (found == null) continue;
-                foreach (var smr in found) candidates.Add((smr, true));
-                scanned++;
-            }
-
-            if (scanned == 0)
-            {
-                SkinnedMeshRenderer[] all = null;
-                try { all = UnityEngine.Object.FindObjectsOfType<SkinnedMeshRenderer>(true); } catch { }
-                if (all != null)
-                    foreach (var smr in all) candidates.Add((smr, false));
-            }
-
-            if (candidates.Count == 0) return;
-
-            // Report the shape of what we see only when it changes, so a 2-second rescan does not
-            // bury the log. Silence must not be mistaken for "nothing matched".
-            int signature = candidates.Count * 397 ^ (scanned > 0 ? 1 : 0);
-            if (signature != _lastSignature)
-            {
-                _lastSignature = signature;
-                Plugin.Log2.LogInfo($"[Hide] {candidates.Count} renderer(s) in scope " +
-                                    (scanned > 0 ? $"({scanned} character root(s) resolved by name)"
-                                                 : "(scene-wide fallback)"));
-            }
-
-            foreach (var (smr, scoped) in candidates)
-            {
-                if (smr == null || smr.gameObject == null) continue;
-
-                string owner = OwnerName(smr);
-                if (!scoped && characterNames.Count > 0 &&
-                    !characterNames.Any(n => Contains(owner, n))) continue;
-
-                if (Plugin.CfgVerbose.Value && _listed.Add(smr.GetInstanceID()))
-                {
-                    Plugin.Log2.LogInfo($"[Hide]   '{smr.name}' enabled={smr.enabled} " +
-                                        $"under '{owner}'");
-                }
-
-                // A renderer the game already disabled is not ours to touch.
-                if (!smr.enabled) continue;
-                if (!rendererNames.Any(n => Contains(smr.name, n))) continue;
-
-                smr.enabled = false;
-                if (_hidden.Add(smr.GetInstanceID()))
-                    Plugin.Log2.LogInfo($"[Hide] hid '{smr.name}' under '{owner}'");
-            }
-
-            ApplyTextureOverrides();
-        }
-
-        /// <summary>
-        /// Re-point a renderer's material at a different, already-loaded texture.
-        ///
-        /// The replacement plugin loads every texture in a pack into memory and then picks one per
-        /// part by name heuristics. For packs whose textures are not named the way those heuristics
-        /// expect, the pick lands on the wrong map -- the MiSide nude mod's body gets 'Cloth' and
-        /// renders in the sweater's colour. The texture the pack actually means is loaded too, so
-        /// naming it here is enough; no bundle parsing is needed.
-        ///
-        /// Assignment mirrors what the replacement plugin itself does (mainTexture plus the two
-        /// common shader property names), because that combination is already known to take effect
-        /// on these materials -- the wrong texture showing up proves the write lands.
-        /// </summary>
-        private void ApplyTextureOverrides()
-        {
-            var pairs = Split(Plugin.CfgTextureOverrides.Value);
-            if (pairs.Count == 0) return;
-
-            // Deliberately scene-wide and unscoped. The replacement plugin does not necessarily
-            // parent its new renderer under the character root we scan for hiding -- and it is the
-            // replacement that is visible. Scoping this to the character made the override land on
-            // the game's disabled original and change nothing on screen.
             SkinnedMeshRenderer[] all = null;
             try { all = UnityEngine.Object.FindObjectsOfType<SkinnedMeshRenderer>(true); } catch { }
             if (all == null) return;
 
-            foreach (var pair in pairs)
+            // Scope is decided by the transform path, not by GameObject.Find. The character roots
+            // are not named what you would guess -- the object is 'Mita Crazy _legacy', not
+            // 'Mita Crazy' -- so a name lookup misses it and a naive implementation silently
+            // degrades into touching the whole scene, the player included.
+            var inScope = new List<SkinnedMeshRenderer>();
+            foreach (var smr in all)
             {
-                int eq = pair.IndexOf('=');
-                if (eq <= 0 || eq == pair.Length - 1)
-                {
-                    Plugin.Log2.LogWarning($"[Hide] TextureOverrides entry '{pair}' is not Name=Texture");
-                    continue;
-                }
-                string rendererName = pair.Substring(0, eq).Trim();
-                string textureName = pair.Substring(eq + 1).Trim();
+                if (smr == null || smr.gameObject == null) continue;
+                if (!PathInScope(FullPath(smr), characters)) continue;
+                inScope.Add(smr);
+            }
 
-                foreach (var smr in all)
+            ReportScope(inScope.Count, all.Length, characters.Count);
+
+            if (hidePatterns.Count > 0) Hide(inScope, hidePatterns);
+            if (overrides.Count > 0) ApplyTextureOverrides(inScope, overrides);
+        }
+
+        private void ReportScope(int scoped, int total, int fragmentCount)
+        {
+            int signature = scoped * 397 ^ fragmentCount;
+            if (signature == _lastScopeSignature) return;
+            _lastScopeSignature = signature;
+
+            var note = fragmentCount == 0
+                ? "(no Characters set, whole scene allowed)"
+                : $"for {fragmentCount} character fragment(s)";
+            Plugin.Log2.LogInfo($"[Hide] {scoped}/{total} renderer(s) in scope {note}");
+        }
+
+        private void Hide(List<SkinnedMeshRenderer> inScope, List<string> patterns)
+        {
+            foreach (var smr in inScope)
+            {
+                if (!smr.enabled) continue;
+                if (!patterns.Any(p => GlobMatch(p, smr.name))) continue;
+
+                string path = FullPath(smr);
+                smr.enabled = false;
+                if (_hid.Add(path))
+                    Plugin.Log2.LogInfo($"[Hide] hid '{smr.name}' at {path}");
+            }
+        }
+
+        /// <summary>
+        /// Re-point albedo textures, per material slot.
+        ///
+        /// Slot control exists because a replacement mesh does not always have the material layout
+        /// the pack authored: the installer can hand back a renderer whose mesh has several
+        /// submeshes but only one material, or -- the case that bit this plugin -- a mesh with ONE
+        /// submesh and therefore exactly one slot that will ever be drawn. Writing the override to
+        /// any other slot is a silent no-op, so the log says so when it happens.
+        /// </summary>
+        private void ApplyTextureOverrides(List<SkinnedMeshRenderer> inScope, List<TexOverride> overrides)
+        {
+            for (int oi = 0; oi < overrides.Count; oi++)
+            {
+                var ov = overrides[oi];
+                foreach (var smr in inScope)
                 {
                     if (smr == null || smr.gameObject == null) continue;
-                    if (!Contains(smr.name, rendererName)) continue;
-                    if (!smr.enabled) continue;                          // the game's original is off
-                    if (!_textured.Add(smr.GetInstanceID())) continue;   // already done
+                    if (!smr.enabled) continue;                          // not ours to touch
+                    if (!GlobMatch(ov.NamePattern, smr.name)) continue;
 
-                    var tex = FindLoadedTexture(textureName);
+                    string key = smr.GetInstanceID() + "|" + oi;
+                    if (_textured.Contains(key)) continue;
+
+                    var tex = FindLoadedTexture(ov.Texture);
                     if (tex == null)
                     {
-                        _textured.Remove(smr.GetInstanceID());           // try again next scan
-                        if (Plugin.CfgVerbose.Value)
-                            Plugin.Log2.LogInfo($"[Hide] texture '{textureName}' not loaded yet");
-                        continue;
+                        Note(smr.GetInstanceID() * 31 + oi,
+                             $"[Hide] texture '{ov.Texture}' not loaded yet (wanted for '{smr.name}' {ov.Raw})");
+                        continue;                                        // retry next scan
                     }
 
-                    AssignTexture(smr, tex);
+                    if (AssignTexture(smr, ov, tex)) _textured.Add(key);
                 }
             }
+        }
+
+        private bool AssignTexture(SkinnedMeshRenderer smr, TexOverride ov, Texture2D tex)
+        {
+            try
+            {
+                Material[] current = null;
+                try { current = smr.sharedMaterials; } catch { }
+                if (current == null) current = new Material[0];
+
+                int subMeshes = -1;
+                try { var mesh = smr.sharedMesh; if (mesh != null) subMeshes = mesh.subMeshCount; } catch { }
+
+                int slotCount = current.Length;
+                if (subMeshes > slotCount) slotCount = subMeshes;
+                if (slotCount <= 0) slotCount = 1;
+
+                // A slot past the end of the current array is legitimate: the renderer can have more
+                // submeshes than materials, which is one of the things this plugin is here to repair.
+                int highest = HighestSlot(ov, slotCount);
+                int length = Math.Max(current.Length, highest + 1);
+
+                var next = new Material[length];
+                for (int i = 0; i < length; i++)
+                    next[i] = i < current.Length
+                        ? current[i]
+                        : (current.Length > 0 ? current[current.Length - 1] : null);
+
+                int touched = 0, wasted = 0;
+                for (int slot = 0; slot < length; slot++)
+                {
+                    if (!SlotSelected(ov, slot, slotCount)) continue;
+                    if (subMeshes >= 0 && slot >= subMeshes) wasted++;   // nothing draws this slot
+                    next[slot] = MakeMaterial(next[slot], tex);
+                    touched++;
+                }
+                if (touched == 0) return false;
+
+                smr.sharedMaterials = next;
+
+                Plugin.Log2.LogInfo($"[Hide] textured '{smr.name}' slot(s) {Describe(ov, slotCount)} " +
+                                    $"with '{tex.name}' ({tex.width}x{tex.height}) at {FullPath(smr)}");
+                if (wasted > 0)
+                    Plugin.Log2.LogWarning(
+                        $"[Hide]   {wasted} of those slot(s) are past the mesh's submesh count " +
+                        $"(subMeshes={subMeshes}) and will not be drawn -- check the slot indices " +
+                        $"in '{ov.Raw}', or set DumpScene to true and read the real counts");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Plugin.Log2.LogWarning($"[Hide] assigning '{tex.name}' to '{smr.name}' failed: " +
+                                       $"{e.GetType().Name}: {e.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>Clone rather than mutate: the source material may be shared with other renderers.</summary>
+        private static Material MakeMaterial(Material source, Texture2D tex)
+        {
+            Material m;
+            if (source != null && source.shader != null)
+            {
+                m = new Material(source.shader);
+                m.CopyPropertiesFromMaterial(source);
+            }
+            else m = new Material(Shader.Find("Standard"));
+
+            // Albedo only.
+            //
+            // An earlier version walked every texture property the shader declares and set them all
+            // to the same image. That is destructive: on these materials it wrote a diffuse atlas
+            // into _BumpMap, _MetallicGlossMap, _OcclusionMap, _EmissionMap and the outline maps at
+            // once, which shows up as shading corruption and jagged outlines around the neck. The
+            // packs themselves only ever set _MainTex, so albedo is both sufficient and faithful.
+            try { m.mainTexture = tex; } catch { }
+            foreach (var alias in AlbedoAliases)
+            {
+                try { if (m.HasProperty(alias)) m.SetTexture(alias, tex); } catch { }
+            }
+            return m;
+        }
+
+        private static readonly string[] AlbedoAliases =
+        {
+            "_BaseMap", "_BaseColorMap", "_MainTexture", "_Albedo", "_AlbedoTex", "_Diffuse", "_DiffuseMap"
+        };
+
+        private static bool SlotSelected(TexOverride ov, int slot, int slotCount)
+        {
+            if (ov.AllSlots) return true;
+            if (ov.Indices != null) return Array.IndexOf(ov.Indices, slot) >= 0;
+            return slot >= ov.From && (ov.To == int.MaxValue || slot <= ov.To);
+        }
+
+        private static int HighestSlot(TexOverride ov, int slotCount)
+        {
+            if (ov.AllSlots) return slotCount - 1;
+            if (ov.Indices != null && ov.Indices.Length > 0) return ov.Indices.Max();
+            int to = ov.To == int.MaxValue ? slotCount - 1 : Math.Min(ov.To, slotCount - 1);
+            return Math.Max(to, ov.From);
+        }
+
+        /// <summary>Report the range that will actually be written, not the raw config text.</summary>
+        private static string Describe(TexOverride ov, int slotCount)
+        {
+            if (ov.AllSlots) return "0.." + (slotCount - 1);
+            if (ov.Indices != null) return string.Join(",", ov.Indices);
+            int to = ov.To == int.MaxValue ? slotCount - 1 : Math.Min(ov.To, slotCount - 1);
+            return ov.From + ".." + to;
+        }
+
+        /// <summary>Parse 'Renderer[1..]=tex', 'Renderer[0,2]=tex', 'Renderer=tex'.</summary>
+        internal static List<TexOverride> ParseOverrides(List<string> entries)
+        {
+            var list = new List<TexOverride>();
+            foreach (var entry in entries)
+            {
+                int eq = entry.IndexOf('=');
+                if (eq <= 0 || eq == entry.Length - 1)
+                {
+                    Plugin.Log2.LogWarning($"[Hide] TextureOverrides entry '{entry}' is not Name=Texture");
+                    continue;
+                }
+
+                var ov = new TexOverride
+                {
+                    Raw = entry.Trim(),
+                    Texture = entry.Substring(eq + 1).Trim()
+                };
+
+                var head = entry.Substring(0, eq).Trim();
+                int open = head.IndexOf('[');
+                if (open < 0)
+                {
+                    ov.NamePattern = head;
+                    ov.AllSlots = true;
+                }
+                else
+                {
+                    int close = head.IndexOf(']', open + 1);
+                    if (close < 0)
+                    {
+                        Plugin.Log2.LogWarning($"[Hide] TextureOverrides entry '{entry}' has '[' without ']'");
+                        continue;
+                    }
+                    ov.NamePattern = head.Substring(0, open).Trim();
+                    var spec = head.Substring(open + 1, close - open - 1).Trim();
+
+                    if (spec.Contains(".."))
+                    {
+                        var parts = spec.Split(new[] { ".." }, StringSplitOptions.None);
+                        if (!int.TryParse(parts[0].Trim(), out ov.From))
+                        {
+                            Plugin.Log2.LogWarning($"[Hide] TextureOverrides entry '{entry}': bad range start");
+                            continue;
+                        }
+                        var tail = parts.Length > 1 ? parts[1].Trim() : "";
+                        if (tail.Length == 0) ov.To = int.MaxValue;
+                        else if (!int.TryParse(tail, out ov.To))
+                        {
+                            Plugin.Log2.LogWarning($"[Hide] TextureOverrides entry '{entry}': bad range end");
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        var idx = new List<int>();
+                        bool bad = false;
+                        foreach (var piece in spec.Split(','))
+                        {
+                            if (piece.Trim().Length == 0) continue;
+                            if (int.TryParse(piece.Trim(), out var v)) idx.Add(v);
+                            else { bad = true; break; }
+                        }
+                        if (bad || idx.Count == 0)
+                        {
+                            Plugin.Log2.LogWarning($"[Hide] TextureOverrides entry '{entry}': bad slot list");
+                            continue;
+                        }
+                        ov.Indices = idx.ToArray();
+                    }
+                }
+
+                if (string.IsNullOrEmpty(ov.NamePattern))
+                {
+                    Plugin.Log2.LogWarning($"[Hide] TextureOverrides entry '{entry}' has no renderer name");
+                    continue;
+                }
+                list.Add(ov);
+            }
+            return list;
+        }
+
+        private void Note(int key, string message)
+        {
+            if (!Plugin.CfgVerbose.Value) return;
+            if (_noted.Add(key)) Plugin.Log2.LogInfo(message);
         }
 
         /// <summary>Look for a texture that is already loaded, whatever loaded it.</summary>
@@ -268,93 +504,127 @@ namespace NeuroMita.HideSlots
             return null;
         }
 
-        private static void AssignTexture(SkinnedMeshRenderer smr, Texture2D tex)
+        // ---------- matching ----------
+
+        /// <summary>Case-insensitive glob. '*' matches any run of characters.</summary>
+        internal static bool GlobMatch(string pattern, string text)
         {
-            try
+            if (string.IsNullOrEmpty(pattern)) return false;
+            if (string.IsNullOrEmpty(text)) return false;
+            if (pattern.IndexOf('*') < 0)
+                return string.Equals(pattern, text, StringComparison.OrdinalIgnoreCase);
+
+            bool anchoredStart = pattern[0] != '*';
+            bool anchoredEnd = pattern[pattern.Length - 1] != '*';
+            var parts = pattern.Split(new[] { '*' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return true;         // pattern was all '*'
+
+            int pos = 0;
+            for (int i = 0; i < parts.Length; i++)
             {
-                var mats = smr.sharedMaterials;
-                if (mats == null || mats.Length == 0)
+                var part = parts[i];
+
+                if (i == 0 && anchoredStart)
                 {
-                    smr.sharedMaterial = MakeMaterial(null, tex);
-                    Plugin.Log2.LogInfo($"[Hide] textured '{smr.name}' with '{tex.name}' (new material)");
-                    return;
+                    if (!text.StartsWith(part, StringComparison.OrdinalIgnoreCase)) return false;
+                    pos = part.Length;
+                    continue;
                 }
 
-                var replacement = new Material[mats.Length];
-                for (int i = 0; i < mats.Length; i++) replacement[i] = MakeMaterial(mats[i], tex);
-                smr.sharedMaterials = replacement;
-                Plugin.Log2.LogInfo($"[Hide] textured '{smr.name}' with '{tex.name}' " +
-                                    $"({tex.width}x{tex.height}, {mats.Length} material(s))");
-            }
-            catch (Exception e)
-            {
-                Plugin.Log2.LogWarning($"[Hide] assigning '{tex.name}' to '{smr.name}' failed: {e.Message}");
-            }
-        }
-
-        /// <summary>Clone rather than mutate: the source material may be shared with other renderers.</summary>
-        private static Material MakeMaterial(Material source, Texture2D tex)
-        {
-            Material m;
-            if (source != null && source.shader != null)
-            {
-                m = new Material(source.shader);
-                m.CopyPropertiesFromMaterial(source);
-            }
-            else m = new Material(Shader.Find("Standard"));
-
-            m.mainTexture = tex;
-            try { m.SetTexture("_BaseMap", tex); } catch { }
-            try { m.SetTexture("_MainTex", tex); } catch { }
-
-            // These are toon-shader models, and a custom shader is free to name its maps anything.
-            // Setting a texture property that does not exist is a silent no-op, so also walk the
-            // shader's own texture properties and set every one. Without this the body can stay on
-            // the wrong map with nothing in the log to explain it.
-            try
-            {
-                var shader = m.shader;
-                int count = shader != null ? shader.GetPropertyCount() : 0;
-                var set = new List<string>();
-                for (int i = 0; i < count; i++)
+                if (i == parts.Length - 1 && anchoredEnd)
                 {
-                    if (shader.GetPropertyType(i) != UnityEngine.Rendering.ShaderPropertyType.Texture) continue;
-                    var name = shader.GetPropertyName(i);
-                    if (string.IsNullOrEmpty(name)) continue;
-                    try { m.SetTexture(name, tex); set.Add(name); } catch { }
+                    if (text.Length - part.Length < pos) return false;
+                    return text.EndsWith(part, StringComparison.OrdinalIgnoreCase);
                 }
-                if (set.Count > 0)
-                    Plugin.Log2.LogInfo($"[Hide]   shader '{shader.name}' texture properties: " +
-                                        string.Join(", ", set));
+
+                int at = text.IndexOf(part, pos, StringComparison.OrdinalIgnoreCase);
+                if (at < 0) return false;
+                pos = at + part.Length;
             }
-            catch (Exception e)
-            {
-                Plugin.Log2.LogWarning($"[Hide] walking shader properties failed: {e.GetType().Name}: {e.Message}");
-            }
-            return m;
+            return true;
         }
 
-        private readonly HashSet<int> _textured = new HashSet<int>();
+        private static bool PathInScope(string path, List<string> fragments)
+        {
+            if (fragments.Count == 0) return true;
+            foreach (var f in fragments)
+                if (path.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
 
-        private int _lastSignature = int.MinValue;
-        private readonly HashSet<int> _listed = new HashSet<int>();
-
-        /// <summary>Walk up a few levels to name the character a renderer belongs to.</summary>
-        private static string OwnerName(Component c)
+        private static string FullPath(Component c)
         {
             try
             {
+                var parts = new List<string>();
                 var t = c.transform;
-                int depth = 0;
-                while (t != null && depth++ < 6)
+                for (int i = 0; i < 64 && t != null; i++)
                 {
-                    var parent = t.parent;
-                    if (parent == null) return t.name;
-                    t = parent;
+                    parts.Add(t.name);
+                    t = t.parent;
                 }
-                return t != null ? t.name : c.gameObject.name;
+                parts.Reverse();
+                return string.Join("/", parts);
             }
-            catch { return c.gameObject.name; }
+            catch { return c != null && c.gameObject != null ? c.gameObject.name : "?"; }
+        }
+
+        private static string AlbedoName(Material m)
+        {
+            try
+            {
+                if (m == null) return "(no material)";
+                var t = m.mainTexture;
+                if (t == null) return "(albedo none)";
+                int w = 0, h = 0;
+                try { w = t.width; h = t.height; } catch { }
+                return $"'{t.name}'({w}x{h})";
+            }
+            catch { return "(albedo ?)"; }
+        }
+
+        /// <summary>
+        /// Full scene inventory. Written because a replacement pack's renderer is typically NOT
+        /// parented under the character root, so the scoped listing says "nothing there" while the
+        /// object plainly exists. The slot list is what tells you which slot is actually drawn.
+        /// </summary>
+        private void DumpScene(int pass)
+        {
+            try
+            {
+                var all = UnityEngine.Object.FindObjectsOfType<SkinnedMeshRenderer>(true);
+                if (all == null) { Plugin.Log2.LogInfo("[Dump] no SkinnedMeshRenderer found"); return; }
+
+                Plugin.Log2.LogInfo($"[Dump] ===== pass {pass}: {all.Length} SkinnedMeshRenderer(s) =====");
+                foreach (var smr in all)
+                {
+                    if (smr == null || smr.gameObject == null) continue;
+
+                    Material[] mats = null;
+                    try { mats = smr.sharedMaterials; } catch { }
+                    int slots = mats != null ? mats.Length : 0;
+
+                    int subMeshes = -1;
+                    try { var mesh = smr.sharedMesh; if (mesh != null) subMeshes = mesh.subMeshCount; } catch { }
+
+                    Plugin.Log2.LogInfo($"[Dump] '{smr.name}' enabled={smr.enabled} subMeshes={subMeshes} " +
+                                        $"slots={slots} path={FullPath(smr)}");
+
+                    for (int i = 0; i < slots; i++)
+                    {
+                        var m = mats[i];
+                        string matName = "(null)", shaderName = "?";
+                        try { if (m != null) { matName = m.name; if (m.shader != null) shaderName = m.shader.name; } } catch { }
+                        Plugin.Log2.LogInfo($"[Dump]      slot{i} mat='{matName}' shader='{shaderName}' " +
+                                            $"albedo={AlbedoName(m)}");
+                    }
+                }
+                Plugin.Log2.LogInfo("[Dump] ===== end of pass =====");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log2.LogWarning($"[Dump] failed: {e.GetType().Name}: {e.Message}");
+            }
         }
 
         private static List<string> Split(string value)
@@ -368,9 +638,5 @@ namespace NeuroMita.HideSlots
             }
             return list;
         }
-
-        private static bool Contains(string haystack, string needle) =>
-            !string.IsNullOrEmpty(haystack) && !string.IsNullOrEmpty(needle) &&
-            haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

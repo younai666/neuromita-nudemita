@@ -1,7 +1,7 @@
 # NeuroMita.HideSlots
 
 A BepInEx plugin for [NeuroMita](https://github.com/VinerX/NeuroMita) that hides named
-`SkinnedMeshRenderer`s on named characters, and re-points a renderer's material at a texture that
+`SkinnedMeshRenderer`s on named characters, and re-points a material slot's albedo at a texture that
 is already loaded.
 
 It exists to finish what a **partial replacement pack** starts.
@@ -30,11 +30,11 @@ correct result: 'Body' + 'body_nsfw', no clothing poking through
 
 **Concretely:** the MiSide nude mod is a `UnityFS 5.x` bundle, and Unity's own AssetBundle API is
 unusable in this game build, so nothing but
-[NeuroMita.CustomModels](https://github.com/younai666/neuromita-custom-models) can install it at
-all. HideSlots then fixes the two problems that install leaves behind.
+[NeuroMita.CustomModels](https://github.com/younai666/neuromita-custom-models) can install it at all.
+HideSlots then fixes the two problems that install leaves behind.
 
-If you install HideSlots without CustomModels you will not get a nude character. You will get the
-game's default Mita with her clothing slots switched off, which is not what anyone wants.
+Install HideSlots without CustomModels and you do not get a nude character. You get the game's
+default Mita with her clothing slots switched off, which is not what anyone wants.
 
 ### What it is and is not, precisely
 
@@ -42,7 +42,7 @@ game's default Mita with her clothing slots switched off, which is not what anyo
 |---|---|
 | **Code dependency on CustomModels** | **None.** The compiled DLL references no other plugin assembly. See [Independence](#independence). |
 | **Functional dependency on CustomModels** | **Total.** It only acts on the state a replacement install produces. |
-| **Dependency on the game's route keys** | **None.** It resolves the game's own scene object names (`Mita Crazy`), not CustomModels' pack folder names (`Crazy`). |
+| **Dependency on CustomModels' route keys** | **None.** It selects characters by the game's own transform paths, not by pack folder names. |
 
 ---
 
@@ -64,11 +64,10 @@ Two further problems come from the texture side:
 
 * The pack holds **126 textures**, and the installer picks one per part by name heuristics. For this
   pack the pick lands on **`Cloth`**, so the naked body renders in the sweater's colour.
-* The texture the pack actually intends is called **`body_nsfw`**, and it is already loaded into
-  memory.
+* The texture the pack actually intends is called **`body_nsfw`**, and it is already loaded.
 
 So this plugin does two small, config-driven things: hide the slots that are now redundant, and name
-the texture that should have been picked. Nothing about it is specific to one mod.
+the texture that should have been picked.
 
 ---
 
@@ -90,55 +89,118 @@ No other files. The plugin has no third-party dependencies — not even a native
 | Section | Key | Default | Meaning |
 |---|---|---|---|
 | General | `Enabled` | `true` | Master switch. |
-| General | `Characters` | `Mita Crazy` | GameObjects to look inside. Comma-separated, case-insensitive substring. Use the **scene** name, not the pack folder name. |
-| General | `HideRenderers` | `SweaterSlot, SkirtSlot, PantyhoseSlot, ShoesSlot` | Renderer names to disable. Case-insensitive substring. |
-| General | `TextureOverrides` | `Body=body_nsfw` | `RendererName=TextureName` pairs. Names a texture that is **already loaded**. |
-| Diagnostics | `Verbose` | `true` | List every renderer found and every hide/override applied. Turn off when done. |
+| General | `Characters` | `Mita Crazy, Mita Cappie, Mita Cappy, Mita Kind, Mita Dream, Mita Sleepy, Mita ShortHair` | Which characters may be touched, as **path fragments**. |
+| General | `HideRenderers` | `Sweater, SweaterSlot, Skirt, SkirtSlot, Shoes, ShoesSlot, Pantyhose, PantyhoseSlot` | Renderer names to disable, matched **exactly**. |
+| General | `TextureOverrides` | `Body=body_nsfw, BodySlot=body_nsfw` | `Renderer[slots]=Texture` entries. |
+| Diagnostics | `Verbose` | `true` | Say what came into scope and what changed. |
+| Diagnostics | `DumpScene` | `false` | Dump every renderer in the scene, six times, 15 seconds apart. |
 
-The scene is rescanned every 2 seconds, so characters spawned after startup are picked up. A renderer
-is only ever touched once.
+The scene is rescanned every 2 seconds, so characters spawned after startup are picked up. Each
+renderer is only ever changed once.
 
-### `Characters`: which name to use
+### `Characters` is matched against the PATH, not the object name
 
-These are two different naming systems, and mixing them up is the most common mistake.
+This is the single most important detail, and getting it wrong is what makes a plugin like this
+wreck the whole scene.
 
-| Pack folder (CustomModels routing) | Scene object name (**what this plugin wants**) |
+Every Mita has a renderer called `Body`. **So does the player.** So does a quest prop. Matching on
+the renderer name cannot tell them apart — only the transform path can:
+
+```
+GameCore/Gameplay Session/GameController/Player/ViewRoot/Person/Body          ← the player
+MenuGame/Scene/Mitas/Mita Crazy/MitaPerson Mita/Slots/BodySlot               ← new-style Mita
+MenuGame/Scene/Mitas/Legacy/Mita Crazy _legacy/MitaPerson Mita/Body          ← legacy Mita
+World/Quests/Quest 1/GameCard/MitaGame/MitaPerson Mita/Body                  ← a quest prop
+```
+
+Note what the game actually calls things. A character root is **`Mita Crazy _legacy`**, not
+`Mita Crazy`, so `GameObject.Find("Mita Crazy")` never finds it. The plugin therefore never uses
+name lookup: it walks each renderer's full transform path and keeps the ones containing one of your
+fragments. A fragment matches both spellings, so `Mita Crazy` covers the new-style and the legacy
+instance at once.
+
+The game presents each Mita in **three** places at once — `MenuGame/Scene/Mitas/<name>`,
+`MenuGame/Scene/Mitas/Legacy/Mita <name> _legacy`, and `MitaCore (Start)/Mitas/<name>` — and all
+three need the fix, which is why the defaults are fragments rather than exact names.
+
+| Pack folder (CustomModels routing) | Path fragment to use here |
 |---|---|
 | `Crazy` | `Mita Crazy` |
+| `Cappie` / `Cappy` | `Mita Cappie`, `Mita Cappy` |
+| `Kind` | `Mita Kind` |
+| `Sleepy` / `Dream` | `Mita Dream`, `Mita Sleepy` |
 | `ShortHair` | `Mita ShortHair` |
-| `Sleepy` / `Dream` | `Mita Dream` |
-| `Player` | `Person` |
+| `Mila` | `Mita Mila` |
+| `Ghost` | `Mita Ghost` |
+| *(player)* | `ViewRoot/Person` — add this only if you really mean the player |
 
-The mapping lives in CustomModels' `Plugin.cs`. This plugin knows nothing about it — it looks up the
-right-hand column directly with `GameObject.Find`. Leave `Characters` empty to scan every
-`SkinnedMeshRenderer` in the scene.
+Leave `Characters` empty to allow the whole scene. That is almost never what you want, and the log
+tells you when it happens.
 
-### Real renderer names
+### `HideRenderers` is matched exactly
 
-Read out of a live scene, not guessed. A Mita carries:
+Exact matching is not pedantry. A substring match on `Body` also hits `BodySlot`, `BodyDark`,
+`BodyTowel`, `BodyTie1` and `BodyTie2` — five wrong renderers per character, per instance family.
+If you want substring behaviour, ask for it with a wildcard: `Skirt*`.
+
+Both spellings are in the default because the game genuinely uses both, and the parts sit in
+different places:
 
 ```
-Head / FaceLayer / Hairs
-SweaterSlot / SkirtSlot / ShoesSlot / PantyhoseSlot
-BodySlot / AttributeSlot
+new-style : .../MitaPerson Mita/Slots/SweaterSlot   (and SkirtSlot, ShoesSlot, PantyhoseSlot)
+legacy    : .../MitaPerson Mita/Sweater             (and Skirt, Shoes, Pantyhose)
 ```
 
-Turn on `Diagnostics.Verbose` to have every renderer under the matched character printed with its
-exact name and current enabled state.
+### `TextureOverrides` targets a SLOT
 
-### `TextureOverrides`: match the replacement, not the original
+```
+Body=body_nsfw              every slot
+Body[0]=body_nsfw           slot 0 only
+Body[0,2]=body_nsfw         slots 0 and 2
+Body[1..]=body_nsfw         slot 1 to the last
+Body[1..2]=body_nsfw        slots 1 and 2
+```
 
-This is the part that is easy to get wrong. When the installer replaces a body it **creates a new
-object** named after the mesh (`Body`) and **disables the original** (`BodySlot`). Overriding a name
-that only matches the disabled original changes nothing you can see.
+Slots exist because a replacement mesh does not always arrive with the material layout the pack
+authored. The installer can hand back a renderer with several submeshes and one material, or — the
+case that actually bit this plugin — **one submesh, so exactly one slot is ever drawn**. Writing an
+override to any other slot is a silent no-op, so the plugin now says so:
 
-For that reason overrides are applied **scene-wide** (not scoped to `Characters`), and **disabled
-renderers are skipped**. Both behaviours are deliberate — see the comments in `Plugin.cs`.
+```
+[Hide] textured 'BodySlot' slot(s) 0..0 with 'body_nsfw' (2048x2048) at MenuGame/.../Slots/BodySlot
+[Hide]   2 of those slot(s) are past the mesh's submesh count (subMeshes=1) and will not be drawn
+```
 
-The override assigns the texture via `mainTexture`, `_BaseMap`, `_MainTex`, and then every texture
-property the material's shader actually declares. These are toon-shader models (`RealToon`), and
-setting a texture property that does not exist is a silent no-op, so walking the shader's own
-property list is what makes the override reliable instead of hit-or-miss.
+Set `Diagnostics.DumpScene = true` to read the real `subMeshes=` and `slots=` counts.
+
+**Only the albedo is rewritten.** An earlier version set every texture property the shader declares
+to the same image, which wrote a diffuse atlas into `_BumpMap`, `_MetallicGlossMap`, `_OcclusionMap`,
+`_EmissionMap` and the outline maps at once. The visible damage was a broken seam and jagged
+outlines around the neck. The packs themselves only ever set `_MainTex`, so albedo is both
+sufficient and faithful.
+
+`TextureOverrides` is matched on the **replacement** renderer, and disabled renderers are skipped:
+the installer creates its new object and disables the original, so a name that only hits the
+disabled original changes nothing you can see.
+
+---
+
+## Making it work for every Mita the pack supports
+
+The nude mod's own description lists it for **Crazy / Cappie / Kind / Sleepy / ShortHair**. The pack
+is one body mesh that fits the shared Mita skeleton, so it is installed once per character route:
+
+```
+<game>\CustomModels\
+    Crazy\mita_nude\mita_nude
+    Cappie\mita_nude\mita_nude
+    Kind\mita_nude\mita_nude
+    Sleepy\mita_nude\mita_nude
+    ShortHair\mita_nude\mita_nude
+```
+
+Each of those routes installs with `RESULT part='Body' ok=True ... residual=0.0001`, and the
+`Characters` default covers both the new-style and the legacy instance of each.
 
 ---
 
@@ -152,12 +214,10 @@ System.Collections   System.Linq   System.Runtime
 UnityEngine.CoreModule
 ```
 
-Notably absent: **`Assembly-CSharp`** (the game's own types) and any other NeuroMita plugin
-assembly. This plugin touches no game class at all — only `GameObject`, `SkinnedMeshRenderer`,
-`Texture2D` and `Material`. That is why it keeps working when the game's internal class layout
-changes, and why it can be reviewed without the game's interop assemblies open beside it.
-
-Because it uses no game types, it also needs very little to build — see below.
+Notably absent: **`Assembly-CSharp`** (the game's own types) and any other NeuroMita plugin assembly.
+This plugin touches no game class at all — only `GameObject`, `SkinnedMeshRenderer`, `Texture2D` and
+`Material`. That is why it keeps working when the game's internal class layout changes, and why it
+can be reviewed without the game's interop assemblies open beside it.
 
 ---
 
