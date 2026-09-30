@@ -43,6 +43,8 @@ Enabled = true
 Characters = Mita Crazy, Mita Cappie, Mita Cappy, Mita Kind, Mita Dream, Mita Sleepy, Mita ShortHair
 HideRenderers = Sweater, SweaterSlot, Skirt, SkirtSlot, Shoes, ShoesSlot, Pantyhose, PantyhoseSlot
 TextureOverrides = Body=body_nsfw, BodySlot=body_nsfw
+MeshSplit = Body = 320, 30471, 40 = -, body_nsfw, Body ; BodySlot = 320, 30471, 40 = -, body_nsfw, Body
+RebindBones =
 
 [Diagnostics]
 Verbose = true

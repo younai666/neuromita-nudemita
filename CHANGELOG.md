@@ -3,6 +3,54 @@
 All notable changes to this project. Format follows [Keep a Changelog](https://keepachangelog.com/);
 versioning is [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-10-01
+
+Two repairs for damage the installer does, and a much better picture of the scene.
+
+### Added
+
+- **`MeshSplit`** — put back a submesh split that the AssetBundle loader flattened. The loader
+  concatenates a pack's submeshes into one triangle list and assigns a single material, because
+  Unity needs one material per submesh and a pack's per-part materials do not survive. The MiSide
+  nude mod's `Body` is three submeshes — a choker (`Cloth`), the body (`body_nsfw`) and a small neck
+  piece (`Body`) — so after install the choker rendered with the body's texture (misspelled spikes
+  at the neck) and the neck piece was painted with the wrong atlas.
+  `MeshSplit = Renderer = tri0, tri1, ... = spec0, spec1, ...` restores the split. Each part spec is
+  a loaded texture name, `-` to keep the material the installer made for that part (which still
+  carries the pack's own map), `drop` to remove the part's triangles, or any of those with
+  `+nooutline` appended to collapse that part's outline shell. The triangle counts come from the
+  pack and are checked against the mesh total before anything is changed.
+- **`+nooutline`** — RealToon (and Poiyomi) draw an outline as an inflated second shell, so where
+  two surfaces nearly coincide the inner shell pushes out through the outer one. Collapsing it
+  removes the artefact without removing geometry, so unlike `drop` it cannot leave a hole.
+- **`RebindBones`** — repair a mesh whose bone slots and bindposes disagree, by copying bindposes
+  by bone name from a renderer that came out right, and re-resolving bone Transforms inside the
+  renderer's own hierarchy. Experimental and off by default; see the note below.
+- **`Diagnostics.DumpScene`** now reports far more per renderer: submesh and slot counts, bone and
+  bindpose counts, the mesh name, the root bone's path and scale, world-space bounds, and per-part
+  model-space bounds. Bounds and bone counts are what make a mis-bound mesh identifiable without
+  looking at a picture.
+
+### Fixed
+
+- **Slot indices beyond the mesh's submesh count are now reported** instead of silently doing
+  nothing. The installed `Body` mesh has one submesh, so exactly one slot is ever drawn; an override
+  aimed anywhere else is a no-op that used to look like a texture that failed to load.
+- **Texture lookup takes the last match when a name is ambiguous.** The game ships its own `Body`
+  and `Cloth`, and a pack installed to five character routes loads five copies of its own; a pack's
+  textures arrive last, so the last match is the pack's.
+- **`-` in a `MeshSplit` part spec is no longer looked up as a texture name.**
+
+### Notes
+
+- `RebindBones` is left off. It repairs a real defect — it moved a mis-bound body from 3.19 to 2.73
+  units tall — but cannot finish the job: a bindpose depends on the bone's world transform at bind
+  time, and a character in the scene is animated, not at rest, so the correct per-instance values
+  cannot be rebuilt from outside. Fixing that case properly means fixing the alignment anchor
+  selection in the installer.
+- Nothing but index data is touched by `MeshSplit`: vertices, weights, bindposes and blend shapes
+  are left alone, which also matters because reading `boneWeights` at runtime crashes this game.
+
 ## [0.2.0] — 2026-10-01
 
 Scope, slots, and a much quieter log. Every fix here comes from watching a live scene rather than

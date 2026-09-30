@@ -92,6 +92,8 @@ No other files. The plugin has no third-party dependencies — not even a native
 | General | `Characters` | `Mita Crazy, Mita Cappie, Mita Cappy, Mita Kind, Mita Dream, Mita Sleepy, Mita ShortHair` | Which characters may be touched, as **path fragments**. |
 | General | `HideRenderers` | `Sweater, SweaterSlot, Skirt, SkirtSlot, Shoes, ShoesSlot, Pantyhose, PantyhoseSlot` | Renderer names to disable, matched **exactly**. |
 | General | `TextureOverrides` | `Body=body_nsfw, BodySlot=body_nsfw` | `Renderer[slots]=Texture` entries. |
+| General | `MeshSplit` | *(empty)* | Put back a submesh split the installer flattened. See below. |
+| General | `RebindBones` | *(empty)* | Repair a mesh whose bones and bindposes disagree. Experimental. |
 | Diagnostics | `Verbose` | `true` | Say what came into scope and what changed. |
 | Diagnostics | `DumpScene` | `false` | Dump every renderer in the scene, six times, 15 seconds apart. |
 
@@ -201,6 +203,75 @@ is one body mesh that fits the shared Mita skeleton, so it is installed once per
 
 Each of those routes installs with `RESULT part='Body' ok=True ... residual=0.0001`, and the
 `Characters` default covers both the new-style and the legacy instance of each.
+
+---
+
+## `MeshSplit`: putting back a split the installer flattened
+
+The AssetBundle loader concatenates a pack's submeshes into **one** triangle list and gives that one
+submesh a single material, because Unity needs one material per submesh and a pack's per-part
+materials do not survive the trip. For the MiSide nude mod that has a visible cost:
+
+```
+pack mesh 'Body'   sub0   320 tris   material 'Cloth'   -> texture 'Cloth'      (the choker)
+                   sub1 30471 tris   material 'Body_4'  -> texture 'body_nsfw'  (the body)
+                   sub2    40 tris   material 'body'    -> texture 'Body'       (neck piece)
+                                     │
+                   installed as ONE submesh with material[0] ('Cloth')
+```
+
+Everything got the choker's map. Naming `body_nsfw` fixed the body and ruined the choker and the
+neck piece, and no slot or texture setting can fix that: **one submesh can only carry one material.**
+`MeshSplit` splits the triangle list again using the pack's own boundaries.
+
+```ini
+MeshSplit = Body = 320, 30471, 40 = -, body_nsfw, Body ; BodySlot = 320, 30471, 40 = -, body_nsfw, Body
+```
+
+Read it as: on `Body` and `BodySlot`, three parts of 320 / 30471 / 40 triangles, with part 0 keeping
+its current material, part 1 on `body_nsfw`, part 2 on `Body`.
+
+Each part spec is one of:
+
+| Spec | Meaning |
+|---|---|
+| `<texture name>` | give this part that loaded texture |
+| `-` | keep the material the installer made for this part — which still carries the pack's own map, and avoids naming a texture whose name collides with the game's |
+| `drop` | remove this part's triangles |
+| `+nooutline` suffix | collapse this part's outline shell (see below) |
+
+The triangle counts are a fixed property of the pack. Read them offline: dump the bundle's `Mesh`
+assets and take `indexCount / 3` for each submesh, in order. The counts must add up to the mesh's
+triangle total, or the entry is skipped with a warning — nothing is changed on a guess.
+
+`Diagnostics.DumpScene` reports `subMeshes=` and `slots=` per renderer, and `MeshSplit` logs each
+part's **model-space bounds**, which is how you tell what a part actually is: the choker above is a
+thin band at the top of the model, the 40-triangle piece is a small centred patch at the neck.
+
+### `+nooutline`, and why `drop` is a last resort
+
+RealToon draws an outline as an inflated second shell. Where two surfaces nearly coincide — a body's
+neck under the head that covers it — the inner shell pushes out through the outer surface, and what
+you see is hard-edged slivers at the join. Collapsing the outline on the part that is being pushed
+through removes the slivers **without removing geometry**, so unlike `drop` it cannot leave a hole.
+
+`drop` is for parts that genuinely are not needed, and it is also a quick way to prove which part an
+artefact comes from: drop it, and if the artefact goes with it, that part was the cause.
+
+---
+
+## `RebindBones`: experimental, and why it cannot always finish
+
+`RebindBones = broken = healthy` repairs a mesh whose bone slots and bindposes disagree — the symptom
+is a body that stretches and tears while its vertices are fine, with bounds that change every frame
+because the error follows the animation. It copies bindposes by bone name from a renderer that came
+out right, and re-resolves each bone Transform inside the renderer's own hierarchy.
+
+It is **off by default**, because it cannot always finish the job. A bindpose describes a bone's
+world transform *at bind time*, and a character standing in a scene is animated, not at rest — so
+where the installer baked a wrong per-instance transform in, there is nothing outside to recover the
+right one from. The case that motivated it moved from 3.19 to 2.73 units tall, still short of the
+1.67 a body should be. Fixing that properly is a change in the model installer's alignment, not here.
 
 ---
 
