@@ -67,12 +67,13 @@ foreach ($name in $managed) {
     Copy-Item $src $pluginDir -Force
 }
 
-Copy-Item (Join-Path $root 'LICENSE')            $stage -Force
-Copy-Item (Join-Path $root 'docs\install.bat')   $stage -Force
-Copy-Item (Join-Path $root 'docs\install.ps1')   $stage -Force
+Copy-Item (Join-Path $root 'LICENSE')                $stage -Force
+Copy-Item (Join-Path $root 'docs\READ-FIRST.txt')    $stage -Force
+Copy-Item (Join-Path $root 'docs\install.bat')       $stage -Force
+Copy-Item (Join-Path $root 'docs\install.ps1')       $stage -Force
 
-# Docs go into their own folder so the root of the archive stays obvious: the installer, the
-# licence, and BepInEx\plugins. Nothing else.
+# Docs go into their own folder so the root of the archive stays obvious: read-me first, the
+# installer, the licence, and BepInEx\plugins. Nothing else.
 $docDir = Join-Path $stage 'docs'
 New-Item -ItemType Directory -Path $docDir -Force | Out-Null
 Copy-Item (Join-Path $root 'README.md')        $docDir -Force
@@ -104,7 +105,24 @@ Write-Host "    (normalised line endings in $normalised text file(s))"
 Write-Host "`n[3/3] zipping..." -ForegroundColor Cyan
 $zip = Join-Path $dist "NeuroMita.NudeMita-$version.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
+
+# Written entry by entry rather than with Compress-Archive.
+#
+# Compress-Archive on Windows PowerShell writes directory separators as backslashes, which is not
+# what the zip specification asks for: an extractor that is not Windows then treats
+# "BepInEx\plugins\x.dll" as one file whose NAME contains backslashes, and the archive unpacks into
+# a single flat mess. Building the entries explicitly keeps them as "BepInEx/plugins/x.dll".
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$stageFull = (Resolve-Path $stage).Path
+$archive = [System.IO.Compression.ZipFile]::Open($zip, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($f in (Get-ChildItem $stage -Recurse -File | Sort-Object FullName)) {
+        $rel = $f.FullName.Substring($stageFull.Length).TrimStart('\', '/') -replace '\\', '/'
+        [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $archive, $f.FullName, $rel, [System.IO.Compression.CompressionLevel]::Optimal)
+    }
+} finally { $archive.Dispose() }
 Write-Host ("    {0}  ({1:N1} KB)" -f $zip, ((Get-Item $zip).Length / 1KB))
 
 # ---------- optional deploy ----------

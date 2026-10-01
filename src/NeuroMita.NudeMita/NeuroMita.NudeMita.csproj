@@ -6,7 +6,7 @@
     <RootNamespace>NeuroMita.NudeMita</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <Version>0.1.0</Version>
+    <Version>0.1.0-pre1</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <!-- The container reader and its texture decoders are NuGet assemblies that have to end up

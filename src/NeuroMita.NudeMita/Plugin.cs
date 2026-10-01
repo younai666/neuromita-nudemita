@@ -29,7 +29,7 @@ namespace NeuroMita.NudeMita
     {
         public const string Guid = "neuromita.nudemita";
         public const string PluginName = "NeuroMita.NudeMita";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.1.0-pre1";
 
         internal static ConfigEntry<bool> CfgEnabled;
         internal static ConfigEntry<string> CfgPackPath;
@@ -143,6 +143,9 @@ namespace NeuroMita.NudeMita
 
         private const float RescanSeconds = 2f;
 
+        /// <summary>How many times one renderer is offered the pack's mesh before giving up on it.</summary>
+        private const int MaxInstallAttempts = 5;
+
         // ---------------------------------------------------------------- state
         private readonly HashSet<int> _installed = new HashSet<int>();
         private readonly HashSet<string> _hid = new HashSet<string>();
@@ -150,8 +153,12 @@ namespace NeuroMita.NudeMita
         private readonly HashSet<int> _noted = new HashSet<int>();
 
         private ModelPackage _pack;
-        private bool _packTried;
+        private ModelPart _body;
+        private float _nextPackTryAt;
+        private bool _packMissingWarned;
+        private readonly Dictionary<int, int> _installTries = new Dictionary<int, int>();
         private int _dumps;
+        private int _lastSceneHandle = int.MinValue;
         private int _lastScopeSignature = int.MinValue;
         private float _nextDumpAt;
         private float _nextScanAt;
@@ -175,6 +182,7 @@ namespace NeuroMita.NudeMita
         private void Scan()
         {
             EnsurePack();
+            ResetOnSceneChange();
 
             SkinnedMeshRenderer[] all = null;
             try { all = UnityEngine.Object.FindObjectsOfType<SkinnedMeshRenderer>(true); } catch { }
@@ -199,85 +207,205 @@ namespace NeuroMita.NudeMita
 
         // ---------------------------------------------------------------- the pack
 
+        /// <summary>
+        /// Find and open the pack. Retried on a timer rather than once at startup, so dropping the
+        /// downloaded file in while the game is running is enough -- no restart, and no puzzle about
+        /// what the file has to be called.
+        ///
+        /// A candidate is accepted only if its body mesh carries exactly the triangle count this
+        /// plugin has baked in, which is what identifies this mod rather than, say, some other Mita
+        /// pack that happens to be lying around. That check also validates the whole profile at
+        /// once: if it passes, the submesh split below cannot fail its own guard.
+        /// </summary>
         private void EnsurePack()
         {
-            if (_pack != null || _packTried) return;
-            _packTried = true;
+            if (_pack != null) return;
+            if (Time.time < _nextPackTryAt) return;
+            _nextPackTryAt = Time.time + 10f;
 
-            var path = ResolvePackPath();
-            if (path == null)
+            foreach (var file in PackCandidates())
             {
-                Logging.Warn("[Nude] the nude mod pack was not found. Put it in " +
-                             $"{Paths.PluginPath} (or next to the game), or point General.PackPath at " +
-                             $"it. Looked for '{Plugin.CfgPackPath.Value}'.");
+                var pkg = ModelPackage.Open(file);
+                if (pkg == null) continue;
+                if (!pkg.Open()) { pkg.Dispose(); continue; }
+
+                var body = FindNudeBody(pkg);
+                if (body == null)
+                {
+                    Logging.Verbose($"[Nude] {Path.GetFileName(file)} is a UnityFS container but its " +
+                                    $"body mesh is not the size this plugin expects; ignoring it");
+                    pkg.Dispose();
+                    continue;
+                }
+
+                _pack = pkg;
+                _body = body;
+                var b = pkg as BundlePackage;
+                Logging.Info($"[Nude] pack ready: {Path.GetFileName(file)} " +
+                             $"({pkg.Parts.Count} part(s), {b?.Textures.Count ?? 0} texture(s))");
+                foreach (var p in pkg.Parts)
+                    Logging.Info($"[Nude]   part '{p.Name}' " +
+                                 $"({(p.Mesh != null ? p.Mesh.vertexCount : 0)} verts, " +
+                                 $"{p.BoneNames?.Length ?? 0} bones)");
                 return;
             }
 
-            Logging.Info($"[Nude] opening pack: {path}");
-            var pkg = ModelPackage.Open(path);
-            if (pkg == null) return;
-            if (!pkg.Open())
+            if (!_packMissingWarned)
             {
-                Logging.Error($"[Nude] could not read the pack at {path}");
-                pkg.Dispose();
-                return;
+                _packMissingWarned = true;
+                Logging.Warn("[Nude] the nude mod pack was not found. Drop the downloaded file into " +
+                             $"{Paths.PluginPath} -- the name does not matter -- or point " +
+                             "General.PackPath at it. This is looked for again every few seconds, so " +
+                             "the game does not need restarting.");
             }
-
-            _pack = pkg;
-            var b = pkg as BundlePackage;
-            Logging.Info($"[Nude] pack ready: {pkg.Parts.Count} part(s), {b?.Textures.Count ?? 0} texture(s)");
-            foreach (var p in pkg.Parts)
-                Logging.Info($"[Nude]   part '{p.Name}' ({(p.Mesh != null ? p.Mesh.vertexCount : 0)} verts, " +
-                             $"{p.BoneNames?.Length ?? 0} bones)");
         }
 
-        private static string ResolvePackPath()
+        /// <summary>
+        /// Where to look, in order. Dedicated folders are searched recursively; the plugins folder
+        /// and the game folder are only skimmed at the top level, because the game folder holds
+        /// gigabytes of assets and walking it would stall the frame.
+        /// </summary>
+        private static List<string> PackCandidates()
         {
-            var raw = Plugin.CfgPackPath.Value;
-            if (string.IsNullOrWhiteSpace(raw)) raw = "mita_nude";
+            var found = new List<string>();
 
-            var candidates = new List<string>();
-            try
+            void AddFile(string f)
             {
-                if (Path.IsPathRooted(raw)) candidates.Add(raw);
-                else
-                {
-                    candidates.Add(Path.Combine(Paths.PluginPath, raw));
-                    candidates.Add(Path.Combine(Paths.GameRootPath, raw));
-                }
+                try { if (File.Exists(f) && ModelPackage.LooksLikeBundle(f)) found.Add(f); } catch { }
             }
-            catch { candidates.Add(raw); }
-
-            foreach (var c in candidates)
+            void AddDir(string dir, bool recursive)
             {
                 try
                 {
-                    if (File.Exists(c)) return c;
-                    if (Directory.Exists(c)) return c;
+                    if (!Directory.Exists(dir)) return;
+                    var opt = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                    foreach (var f in Directory.GetFiles(dir, "*", opt))
+                        if (ModelPackage.LooksLikeBundle(f)) found.Add(f);
                 }
                 catch { }
+            }
+            void AddPath(string p)
+            {
+                try
+                {
+                    if (File.Exists(p)) AddFile(p);
+                    else if (Directory.Exists(p)) AddDir(p, true);
+                }
+                catch { }
+            }
+
+            string plugins = null, gameRoot = null;
+            try { plugins = Paths.PluginPath; } catch { }
+            try { gameRoot = Paths.GameRootPath; } catch { }
+
+            // 1. whatever was configured, if anything
+            var raw = Plugin.CfgPackPath.Value;
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                try
+                {
+                    if (Path.IsPathRooted(raw)) AddPath(raw);
+                    else
+                    {
+                        if (plugins != null) AddPath(Path.Combine(plugins, raw));
+                        if (gameRoot != null) AddPath(Path.Combine(gameRoot, raw));
+                    }
+                }
+                catch { }
+            }
+
+            // 2. the conventional places, under any file name
+            if (plugins != null)
+            {
+                AddPath(Path.Combine(plugins, "mita_nude"));
+                AddDir(Path.Combine(plugins, "NudeMita"), true);
+                AddDir(plugins, false);
+            }
+            if (gameRoot != null)
+            {
+                AddPath(Path.Combine(gameRoot, "mita_nude"));
+                AddDir(gameRoot, false);
+            }
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var ordered = new List<string>();
+            foreach (var f in found)
+            {
+                string key;
+                try { key = Path.GetFullPath(f); } catch { key = f; }
+                if (seen.Add(key)) ordered.Add(f);
+            }
+            return ordered;
+        }
+
+        /// <summary>
+        /// The pack's body: named 'Body' and carrying exactly the triangle count the profile above
+        /// was written against. Both conditions matter -- the name alone would match other packs.
+        /// </summary>
+        private static ModelPart FindNudeBody(ModelPackage pkg)
+        {
+            int expected = 0;
+            foreach (var t in SplitTris) expected += t;
+
+            foreach (var p in pkg.Parts)
+            {
+                if (p == null || p.Mesh == null) continue;
+                if (!string.Equals(p.Name, "Body", StringComparison.OrdinalIgnoreCase)) continue;
+
+                int tris = 0;
+                try
+                {
+                    var t = p.Mesh.triangles;
+                    if (t != null) tris = t.Length / 3;
+                }
+                catch { }
+                if (tris == expected) return p;
             }
             return null;
         }
 
-        /// <summary>The part that is the body: the one named Body, else the largest mesh.</summary>
-        private static ModelPart PickBodyPart(ModelPackage pkg)
+        /// <summary>
+        /// Drop the per-renderer bookkeeping when the scene changes.
+        ///
+        /// Everything the plugin remembers about a renderer is keyed by its instance id, and those
+        /// are only unique among live objects. A new scene brings new renderers, so keeping the old
+        /// ids around would both grow the sets for the whole session and -- worse -- let a recycled
+        /// id mark a brand new renderer as already handled.
+        /// </summary>
+        private void ResetOnSceneChange()
         {
-            ModelPart best = null;
-            foreach (var p in pkg.Parts)
+            int handle;
+            try { handle = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle; }
+            catch { return; }
+
+            if (handle == _lastSceneHandle) return;
+            _lastSceneHandle = handle;
+
+            _installed.Clear();
+            _split.Clear();
+            _installTries.Clear();
+            _hid.Clear();
+            _lastScopeSignature = int.MinValue;
+        }
+
+        /// <summary>
+        /// Was this renderer given the pack's mesh? The installer names every mesh it builds
+        /// '&lt;name&gt;_aligned', which is the one thing a recycled instance id cannot fake.
+        /// </summary>
+        private static bool HasInstalledMesh(SkinnedMeshRenderer smr)
+        {
+            try
             {
-                if (p == null || p.Mesh == null) continue;
-                if (string.Equals(p.Name, "Body", StringComparison.OrdinalIgnoreCase)) return p;
-                if (best == null || p.Mesh.vertexCount > best.Mesh.vertexCount) best = p;
+                var mesh = smr.sharedMesh;
+                return mesh != null && !string.IsNullOrEmpty(mesh.name) &&
+                       mesh.name.EndsWith("_aligned", StringComparison.Ordinal);
             }
-            return best;
+            catch { return false; }
         }
 
         private void Install(List<SkinnedMeshRenderer> inScope)
         {
-            if (_pack == null) return;
-            var part = PickBodyPart(_pack);
-            if (part == null) { Logging.Error("[Nude] the pack has no usable mesh"); return; }
+            if (_pack == null || _body == null) return;
 
             foreach (var smr in inScope)
             {
@@ -286,7 +414,25 @@ namespace NeuroMita.NudeMita
                     continue;
 
                 int key = smr.GetInstanceID();
-                if (_installed.Contains(key)) continue;
+                if (_installed.Contains(key))
+                {
+                    if (HasInstalledMesh(smr)) continue;
+                    _installed.Remove(key);      // a recycled id, not this renderer
+                }
+
+                // A failed attempt is retried, but only so many times: a renderer that refuses the
+                // mesh every two seconds forever is a stuck case, and retrying it silently would bury
+                // the one line that says so. A scene change gives the renderer a new instance id and
+                // therefore a fresh budget.
+                int tries;
+                _installTries.TryGetValue(key, out tries);
+                if (tries >= MaxInstallAttempts)
+                {
+                    WarnOnce(key * 31 + 5,
+                        $"[Nude] giving up on {FullPath(smr)} after {tries} attempts");
+                    continue;
+                }
+                _installTries[key] = tries + 1;
 
                 var root = FindSkeletonRoot(smr);
                 if (root == null)
@@ -296,11 +442,18 @@ namespace NeuroMita.NudeMita
                     continue;
                 }
 
-                var rep = ModelApplier.Apply(smr, part, root);
-                Logging.Info($"[Nude] {FullPath(smr)}: {rep}");
-                if (!rep.Ok) continue;
+                var rep = ModelApplier.Apply(smr, _body, root);
+                if (!rep.Ok)
+                {
+                    if (tries + 1 >= MaxInstallAttempts)
+                        Logging.Warn($"[Nude] gave up on {FullPath(smr)}: {rep.Message}");
+                    else
+                        Logging.Verbose($"[Nude] attempt {tries + 1} at {FullPath(smr)}: {rep}");
+                    continue;
+                }
 
-                ApplyPackMainTexture(smr, part);
+                Logging.Info($"[Nude] {FullPath(smr)}: {rep}");
+                ApplyPackMainTexture(smr, _body);
                 _installed.Add(key);
             }
         }
@@ -407,7 +560,11 @@ namespace NeuroMita.NudeMita
                     continue;
 
                 int key = smr.GetInstanceID();
-                if (_split.Contains(key)) continue;
+                if (_split.Contains(key))
+                {
+                    if (HasInstalledMesh(smr)) continue;
+                    _split.Remove(key);          // a recycled id, not this renderer
+                }
 
                 var mesh = smr.sharedMesh;
                 if (mesh == null) continue;

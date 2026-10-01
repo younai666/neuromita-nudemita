@@ -71,19 +71,48 @@ if ($missing.Count -gt 0) { throw "these file(s) are not next to this script: $(
 Write-Host "installed: $($dlls.Count) file(s) -> $plugins" -ForegroundColor Green
 
 # ---------- check the pack ----------
-# Stated plainly, because the plugin has nothing to install without it and the game will simply look
-# normal, which is a confusing way to find out.
-$pack = Join-Path $plugins 'mita_nude'
+# Stated plainly, because without the pack the plugin has nothing to install and the game simply
+# looks normal, which is a confusing way to find out.
+#
+# The check mirrors what the plugin does: any file whose header is UnityFS, under any name, either
+# straight in BepInEx\plugins, in a NudeMita subfolder, or in the game folder. The plugin does the
+# stronger check (the body mesh has to match), which needs to parse the container and cannot be done
+# from a batch file.
+function Test-UnityFs([string]$path) {
+    try {
+        $fs = [System.IO.File]::OpenRead($path)
+        try {
+            $buf = New-Object byte[] 7
+            if ($fs.Read($buf, 0, 7) -lt 7) { return $false }
+            return ($buf[0] -eq 0x55 -and $buf[1] -eq 0x6E -and $buf[2] -eq 0x69 -and
+                    $buf[3] -eq 0x74 -and $buf[4] -eq 0x79 -and $buf[5] -eq 0x46 -and $buf[6] -eq 0x53)
+        } finally { $fs.Dispose() }
+    } catch { return $false }
+}
+
+$foundPack = $null
+$searchDirs = @($plugins, (Join-Path $plugins 'NudeMita'), $game)
+foreach ($dir in $searchDirs) {
+    if ($foundPack) { break }
+    if (-not (Test-Path $dir)) { continue }
+    foreach ($f in (Get-ChildItem $dir -File -ErrorAction SilentlyContinue)) {
+        if (Test-UnityFs $f.FullName) { $foundPack = $f.FullName; break }
+    }
+}
+
 Write-Host ""
-if (Test-Path $pack) {
-    Write-Host "OK  : the nude mod pack was found: $pack" -ForegroundColor Green
+if ($foundPack) {
+    Write-Host "OK  : a UnityFS pack was found: $foundPack" -ForegroundColor Green
+    Write-Host "      (the plugin confirms it is the right one when the game starts)" -ForegroundColor DarkGray
 } else {
-    Write-Warning "the nude mod pack is NOT in BepInEx\plugins."
+    Write-Warning "the nude mod pack was NOT found."
     Write-Host "      This plugin is the loader and the fix-ups; the model itself is the pack." -ForegroundColor Yellow
-    Write-Host "      Download the nude mod and put its bundle at:" -ForegroundColor Yellow
-    Write-Host "          $pack" -ForegroundColor Yellow
-    Write-Host "      (a folder also works, as long as one file inside it is a UnityFS container;" -ForegroundColor Yellow
-    Write-Host "       point General.PackPath in the config elsewhere if you prefer another location.)" -ForegroundColor Yellow
+    Write-Host "      Download it from the mod page:" -ForegroundColor Yellow
+    Write-Host "          https://www.nexusmods.com/miside/mods/58" -ForegroundColor Yellow
+    Write-Host "      and put the file -- any name -- into:" -ForegroundColor Yellow
+    Write-Host "          $plugins" -ForegroundColor Yellow
+    Write-Host "      A folder also works, as long as one file inside it is a UnityFS container." -ForegroundColor Yellow
+    Write-Host "      The plugin looks again every few seconds, so the game does not need restarting." -ForegroundColor Yellow
 }
 
 Write-Host ""
