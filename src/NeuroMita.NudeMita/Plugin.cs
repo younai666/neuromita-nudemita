@@ -29,7 +29,7 @@ namespace NeuroMita.NudeMita
     {
         public const string Guid = "neuromita.nudemita";
         public const string PluginName = "NeuroMita.NudeMita";
-        public const string PluginVersion = "0.1.0-pre1";
+        public const string PluginVersion = "0.1.0";
 
         internal static ConfigEntry<bool> CfgEnabled;
         internal static ConfigEntry<string> CfgPackPath;

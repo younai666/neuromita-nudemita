@@ -80,6 +80,7 @@ Copy-Item (Join-Path $root 'README.md')        $docDir -Force
 Copy-Item (Join-Path $root 'CHANGELOG.md')     $docDir -Force
 Copy-Item (Join-Path $root 'docs\INSTALL.md')  $docDir -Force
 Copy-Item (Join-Path $root 'docs\FAQ.md')      $docDir -Force
+Copy-Item (Join-Path $root 'docs\RELEASE-NOTES.md') $docDir -Force
 
 Get-ChildItem $pluginDir -File | ForEach-Object {
     Write-Host ("    {0,-34} {1,8:N0} KB" -f $_.Name, ($_.Length / 1KB))

@@ -50,7 +50,7 @@ AssetRipper.TextureDecoder.dll
 ## Что должно быть в логе
 
 ```
-[Nude] ===== NeuroMita.NudeMita 0.1.0-pre1 =====
+[Nude] ===== NeuroMita.NudeMita 0.1.0 =====
 [Nude] pack ready: mita_nude (3 part(s), 3 texture(s))
 [Nude]   part 'Body' (17824 verts, 180 bones)
 [Nude] 81/135 renderer(s) in scope for 7 character fragment(s)
@@ -90,6 +90,100 @@ AssetRipper.TextureDecoder.dll
 Удалите из `BepInEx\plugins` файл `NeuroMita.NudeMita.dll` и три сборки `AssetsTools*` /
 `AssetRipper*`, а также, при желании, `BepInEx\config\neuromita.nudemita.cfg`. Пакет можно оставить.
 Ничего на диске не изменяется, файлы игры не затрагиваются.
+
+<br>
+
+---
+<!-- ============================ ENGLISH ============================ -->
+
+# Installing NeuroMita.NudeMita (English)
+
+## Requirements
+
+1. **BepInEx 6.0.0-be.788** or newer, installed in the game. Older builds cannot read this game's
+   `metadata v39`, and nothing here works without BepInEx.
+2. **The nude mod pack** — **<https://www.nexusmods.com/miside/mods/58>**. This plugin is the loader
+   and the fix-ups; the model itself is the pack. It is somebody else's work and is not
+   redistributed with this plugin.
+
+## Install in four steps
+
+**Step 1.** Download the pack from the mod page — <https://www.nexusmods.com/miside/mods/58> — and
+put the file into:
+
+```
+<game>\BepInEx\plugins\
+```
+
+**The file name does not matter.** The plugin looks for any `UnityFS` container in that folder whose
+body mesh matches what it expects. A `NudeMita` subfolder works too, and so does the game folder.
+
+**Step 2.** Extract this plugin's archive into the game folder — the one holding `NeuroMita.exe`.
+
+**Step 3.** Run **`install.bat`**. It will find the game (or accept a game folder dragged onto it),
+copy `NeuroMita.NudeMita.dll` and the three assemblies it needs into `BepInEx\plugins`, and tell you
+whether the pack is in place.
+
+**Step 4.** Launch the game.
+
+No administrator rights, no game file is modified, and running it twice is safe.
+
+### Manually
+
+Copy these four files from the archive's `BepInEx\plugins` into the game's `BepInEx\plugins`:
+
+```
+NeuroMita.NudeMita.dll
+AssetsTools.NET.dll
+AssetsTools.NET.Texture.dll
+AssetRipper.TextureDecoder.dll
+```
+
+Nothing else. There is no native library.
+
+## What the log should say
+
+```
+[Nude] ===== NeuroMita.NudeMita 0.1.0 =====
+[Nude] pack ready: mita_nude (3 part(s), 3 texture(s))
+[Nude]   part 'Body' (17824 verts, 180 bones)
+[Nude] 81/135 renderer(s) in scope for 7 character fragment(s)
+[Nude] …/Slots/BodySlot: part='Body' ok=True bones=180 missing=5 residual=0.0001
+[Nude] hid 'SweaterSlot' at …/Slots/SweaterSlot
+[Nude] split 'BodySlot' into 3 part(s) [320, 30471, 40] tris at …/Slots/BodySlot
+```
+
+**Fifteen** renderers get installed and split: five Mitas, each of which the game presents in three
+places at once.
+
+## Reading the log
+
+| Line | Meaning |
+|---|---|
+| `the nude mod pack was not found` | Put the pack in place, or set `General.PackPath`. It is looked for again every few seconds, so **the game does not need restarting**. |
+| `pack ready: 3 part(s), 3 texture(s)` | The container was read successfully. |
+| `ok=True … residual=0.0001` | The pack's rest pose was aligned to this character. A `residual` well above `0.02` means the pack was built on a different rig and is refused. |
+| `split 'BodySlot' into 3 part(s)` | The pack's submesh boundaries were restored. |
+| `has N triangles, not the pack's 30831` | This renderer does not carry the pack's body yet. Expected before the install lands; it retries every 2 seconds. |
+| `T/N renderer(s) in scope` | How much of the scene the plugin is allowed to touch. `0/N` means something is wrong; near `N` would mean the character fragments matched everything. |
+
+## If the body looks stretched or torn
+
+Set `Diagnostics.DumpScene = true` and find the character in the log:
+
+```
+[Dump] 'BodySlot' … bounds=0.64x1.67x0.62 … path=MitaCore (Start)/Mitas/Mita Dream/…
+```
+
+A healthy body is about `0.7 x 1.7 x 0.7` at a scale of `1.000`. Bounds near `3 x 3 x 3` mean the
+mesh is bound against the wrong bones — a binding problem, not a modelling one — and those values
+are worth reporting.
+
+## Uninstalling
+
+Delete `NeuroMita.NudeMita.dll` and the three `AssetsTools*` / `AssetRipper*` assemblies from
+`BepInEx\plugins`, and optionally `BepInEx\config\neuromita.nudemita.cfg`. The pack can stay or go.
+Nothing on disk is modified and no game file is touched.
 
 <br>
 

@@ -3,10 +3,11 @@
 All notable changes to this project. Format follows [Keep a Changelog](https://keepachangelog.com/);
 versioning is [Semantic Versioning](https://semver.org/).
 
-## [0.1.0-pre1] — 2026-10-01
+## [0.1.0] — 2026-10-01
 
-Pre-release. It is tagged `pre` because it has not been through a full playthrough yet, and because
-the pack it is written against may still be revised by its author.
+First release. It had a `pre` tag while it was being checked over; it is a normal release now that
+the checks below pass and the package has been verified end to end, though a full playthrough is
+still outstanding.
 
 First release. The nude mod for Mita as a single self-contained plugin: it reads the pack, installs
 it, and finishes the parts a container loader cannot.

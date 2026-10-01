@@ -190,6 +190,185 @@ powershell -File tools\verify-bindpose-math.ps1   # формула bind pose, б
 ---
 
 <!-- ====================================================================== -->
+<!--  ENGLISH                                                               -->
+<!-- ====================================================================== -->
+
+# NeuroMita.NudeMita (English)
+
+**The nude mod for Mita** as one self-contained BepInEx plugin for
+[NeuroMita](https://github.com/VinerX/NeuroMita).
+
+Download it, drop the mod pack next to it, launch the game. Nothing else to install, nothing to
+configure.
+
+Five Mitas are covered, which is what the mod itself ships for: **Crazy / Cappie / Kind / Sleepy /
+ShortHair**.
+
+---
+
+## What it does
+
+Model packs for this game are `UnityFS` containers, and Unity's own AssetBundle API is unusable on
+this build — the game never initialises the subsystem, so every `AssetBundle.LoadFrom*` overload is
+dead. The plugin therefore **reads the container itself** and does the whole job:
+
+1. **Parses the pack** — meshes, bind poses, bone names, materials, and textures decoded out of the
+   container's resource streams.
+2. **Aligns it to the game skeleton.** The pack's rest pose is solved onto the game's, with a
+   residual check so a pack that does not fit is refused rather than deformed.
+3. **Binds it** — bone by bone, each bind pose taken from the game's own skeleton, with orphan
+   vertex weights repaired.
+4. **Hides the game's clothing slots** that are still enabled underneath.
+5. **Splits the mesh back apart and re-maps its textures.** This is what separates "a body with a
+   weird neck" from a correct one.
+
+Everything after step 3 exists because of how the pack is authored.
+
+### Why steps 4 and 5 are necessary
+
+The pack's `Body` mesh is **three submeshes with three different materials**:
+
+```
+sub0   320 tris   material 'Cloth'    -> texture 'Cloth'       the choker
+sub1 30471 tris   material 'Body_4'   -> texture 'body_nsfw'   the body
+sub2    40 tris   material 'body'     -> texture 'Body'        the neck piece
+```
+
+A container loader has to concatenate those into **one** triangle list, because Unity wants one
+material per submesh and the pack's per-part materials do not survive the trip. One submesh can only
+carry one material, so whichever map is picked gets painted over all three parts — which is why a
+naive install renders the choker in skin, or the body in the sweater's colour. The parts whose UVs
+were authored against a different atlas then come out as hard-edged slivers exactly at the neck.
+
+`MeshSplit` puts the three parts back on the pack's own boundaries and gives each the map its UVs
+belong to. Only index data is touched: vertices, weights, bind poses and blend shapes are left
+alone, which also matters because reading `boneWeights` at runtime crashes this game.
+
+The game's clothing is still on as well: the pack covers only the body, so the game's own
+`Sweater` / `Skirt` / `Shoes` / `Pantyhose` renderers would draw straight through it. Both spellings
+are hidden, because the game uses both:
+
+```
+new-style : .../MitaPerson Mita/Slots/SweaterSlot   (and SkirtSlot, ShoesSlot, PantyhoseSlot)
+legacy    : .../MitaPerson Mita/Sweater             (and Skirt, Shoes, Pantyhose)
+```
+
+### And it has to leave everything else alone
+
+The **player's** body renderer is literally called `Body`. So is every other Mita's, and so is a
+quest prop's. Matching on renderer names therefore cannot work, and neither can looking a character
+up by name: the character root is **`Mita Crazy _legacy`**, not `Mita Crazy`, so `GameObject.Find`
+misses it and a naive fallback ends up touching the whole scene.
+
+Every change is scoped by matching a fragment against the renderer's **full transform path**, which
+is the only thing that tells those apart:
+
+```
+GameCore/Gameplay Session/GameController/Player/ViewRoot/Person/Body     <- the player, left alone
+MenuGame/Scene/Mitas/Mita Crazy/MitaPerson Mita/Slots/BodySlot          <- covered
+MenuGame/Scene/Mitas/Legacy/Mita Crazy _legacy/MitaPerson Mita/Body     <- covered
+World/Quests/Quest 1/GameCard/MitaGame/MitaPerson Mita/Body             <- a prop, left alone
+```
+
+The game instantiates each Mita in three places at once (`MenuGame/Scene/Mitas/<name>`,
+`…/Legacy/Mita <name> _legacy`, `MitaCore (Start)/Mitas/<name>`) and all three are covered.
+
+---
+
+## Requirements
+
+* **BepInEx 6.0.0-be.788** or newer for NeuroMita. Older builds cannot read this game's
+  `metadata v39`.
+* **The nude mod pack** — **<https://www.nexusmods.com/miside/mods/58>**. It is somebody else's work
+  and is deliberately *not* redistributed here. Put the file, **under any name**, into:
+
+  ```
+  <game>\BepInEx\plugins\
+  ```
+
+  A folder works too, as long as one file inside it is a `UnityFS` container; `General.PackPath`
+  points elsewhere if you prefer.
+
+---
+
+## Install
+
+Extract the release zip into the game folder (the one holding `NeuroMita.exe`) and run
+**`install.bat`**. It copies four files into `BepInEx\plugins` and tells you whether the pack is in
+place. No administrator rights, no game file is ever modified, and running it twice is safe.
+
+## Configuration
+
+`BepInEx\config\neuromita.nudemita.cfg`
+
+| Section | Key | Default | Meaning |
+|---|---|---|---|
+| General | `Enabled` | `true` | Master switch. |
+| General | `PackPath` | `mita_nude` | Where the pack is. Relative paths resolve against `BepInEx\plugins`, then the game folder. |
+| Diagnostics | `Verbose` | `true` | Say what came into scope and what changed. |
+| Diagnostics | `DumpScene` | `false` | Inventory every renderer in the scene, six times, 15 seconds apart. |
+
+That is the whole file. There is no routing to configure, no per-character setup, and no pack DSL:
+this plugin exists for one mod.
+
+### `DumpScene` is the useful one
+
+It prints, per renderer: full transform path, submesh and slot counts, bone and bindpose counts,
+mesh name, root bone and its scale, world bounds, and every material slot's albedo. It is how a
+wrongly bound mesh gets identified **without looking at a picture** — a mesh bound against the wrong
+bones comes out at the wrong size while its vertices are perfectly fine:
+
+```
+[Dump] 'BodySlot' enabled=True subMeshes=3 slots=3 bones=180 bindposes=180 mesh='Body_aligned' … bounds=0.64x1.67x0.62 … path=MitaCore (Start)/Mitas/Mita Dream/…
+```
+
+A healthy body is about `0.7 x 1.7 x 0.7`. Anything near `3 x 3 x 3` is a binding problem, not a
+modelling one.
+
+---
+
+## Building and offline verification
+
+Requires the .NET 6 SDK, and a game install launched once with BepInEx present.
+
+```powershell
+# point at a game install, any one of:
+#   -p:GameDir="D:\Games\NeuroMita"  |  $env:NEUROMITA_DIR  |  a game.dir file at the repo root
+
+powershell -File package.ps1                                  # build + release zip
+powershell -File package.ps1 -GameDir "D:\Games\NeuroMita"     # build + deploy
+
+# neither of these starts the game
+powershell -File tools\verify-release.ps1 -Pack <path to the pack>
+powershell -File tools\verify-bindpose-math.ps1
+```
+
+`tools\verify-release.ps1` runs 49 checks over the built release: version agreement across csproj,
+source and assembly; the `BepInPlugin` identity; what the assembly links against; source hygiene;
+that every script parses; and the archive's contents, separators, line endings and encodings. Given
+`-Pack`, it also re-checks the baked profile against the real container with `tools\bundledump`.
+
+`tools\verify-bindpose-math.ps1` proves the bind-pose formula numerically, with no Unity: the
+corrected order reproduces the skinning identity to `1e-16`, while the old order displaces a vertex
+by 1.8 scene units on a body 1.67 tall.
+
+---
+
+## Credits and licence
+
+* **The pack is not ours.** The nude mod is the work of its own author; this project only loads and
+  finishes it, and does not redistribute it.
+* The `UnityFS` container reader, the alignment solver, the bone binder and the weight repair
+  descend from **[NeuroMita.CustomModels](https://github.com/younai666/neuromita-custom-models)**
+  (MIT), which handles arbitrary packs and the FBX path. This plugin is the nude-mod-specific half
+  of that work, with the alignment bind-pose bug fixed and the parts that only matter to general
+  pack installation left out.
+* This project is MIT — see [LICENSE](LICENSE).
+
+<br>
+
+---
+<!-- ====================================================================== -->
 <!--  中文（次要语言）                                                       -->
 <!-- ====================================================================== -->
 

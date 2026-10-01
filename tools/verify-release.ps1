@@ -154,7 +154,8 @@ if ($Zip -and (Test-Path $Zip)) {
                           'BepInEx/plugins/AssetsTools.NET.dll',
                           'BepInEx/plugins/AssetsTools.NET.Texture.dll',
                           'BepInEx/plugins/AssetRipper.TextureDecoder.dll',
-                          'docs/README.md', 'docs/INSTALL.md', 'docs/FAQ.md', 'docs/CHANGELOG.md') {
+                          'docs/README.md', 'docs/INSTALL.md', 'docs/FAQ.md', 'docs/CHANGELOG.md',
+                          'docs/RELEASE-NOTES.md') {
             Check ("contains {0}" -f $need) ($names -contains $need)
         }
 
@@ -200,18 +201,42 @@ if ($Zip -and (Test-Path $Zip)) {
 
         $rm = Read-Entry 'docs/README.md'
         $im = Read-Entry 'docs/INSTALL.md'
+        $fa = Read-Entry 'docs/FAQ.md'
         $ff = Read-Entry 'READ-FIRST.txt'
+        $rn = Read-Entry 'docs/RELEASE-NOTES.md'
 
-        # Comparing script ranges rather than literal words keeps this file ASCII-only.
-        $ruIdx = [regex]::Match($rm, '[\u0400-\u04FF]').Index
-        $zhIdx = [regex]::Match($rm, '[\u4e00-\u9fff]').Index
+        # Language sections are located by their markers, not by "the first Cyrillic character" or
+        # "the first CJK character": the document titles are bilingual by design ("Установка / 安装"),
+        # so a character test would land on a title instead of on a section. All three come back as
+        # LINE numbers -- mixing a character offset with a line number would compare two different
+        # units and pass or fail by luck.
+        function Get-LanguageLayout([string]$text) {
+            $lines = [regex]::Split($text, "\r?\n")
+            $ru = -1; $en = -1; $zh = -1
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($ru -lt 0 -and $lines[$i] -match '[\u0400-\u04FF]') { $ru = $i }
+                if ($en -lt 0 -and $lines[$i] -match 'ENGLISH|English') { $en = $i }
+                if ($zh -lt 0 -and (($lines[$i] -match '^<!--.*[\u4e00-\u9fff].*-->') -or
+                                    ($lines[$i] -match '^\s*[\u4e00-\u9fff]+\s*$'))) { $zh = $i }
+            }
+            return [pscustomobject]@{ Ru = $ru; En = $en; Zh = $zh }
+        }
+
+        foreach ($pair in @(@('README.md', $rm), @('INSTALL.md', $im), @('FAQ.md', $fa),
+                            @('READ-FIRST.txt', $ff), @('RELEASE-NOTES.md', $rn))) {
+            $lay = Get-LanguageLayout $pair[1]
+            Check ("{0}: Russian, then English, then Chinese" -f $pair[0]) `
+                  (($lay.En -ge 0) -and ($lay.Ru -ge 0) -and ($lay.En -gt $lay.Ru) -and ($lay.Zh -gt $lay.En)) `
+                  "ru@$($lay.Ru) en@$($lay.En) zh@$($lay.Zh)"
+        }
+
+        $allDocs = $rm + $im + $fa + $ff + $rn
         Check 'README carries the mod page URL' ($rm -match 'nexusmods\.com/miside/mods/58')
-        Check 'README is bilingual, Russian first' (($ruIdx -ge 0) -and ($zhIdx -gt $ruIdx)) "first Cyrillic @$ruIdx, first CJK @$zhIdx"
-        Check 'README has both Russian and Chinese' (($ruIdx -ge 0) -and ($zhIdx -ge 0))
         Check 'INSTALL.md carries the mod page URL' ($im -match 'nexusmods\.com/miside/mods/58')
         Check 'READ-FIRST carries the mod page URL' ($ff -match 'nexusmods\.com/miside/mods/58')
-        Check 'READ-FIRST is bilingual' (([regex]::Match($ff, '[\u0400-\u04FF]').Success) -and ([regex]::Match($ff, '[\u4e00-\u9fff]').Success))
-        Check 'no doc still points at the old plugin name' (-not (($rm + $im + $ff) -match 'HideSlots'))
+        Check 'RELEASE-NOTES carries the mod page URL' ($rn -match 'nexusmods\.com/miside/mods/58')
+        Check 'every doc decodes without replacement characters' (-not ($allDocs -match [char]0xFFFD))
+        Check 'no doc still points at the old plugin name' (-not ($allDocs -match 'HideSlots'))
 
         Write-Host ("        {0} entries, {1:N1} KB" -f $a.Entries.Count, ((Get-Item $Zip).Length / 1KB)) -ForegroundColor DarkGray
     } finally { $a.Dispose() }

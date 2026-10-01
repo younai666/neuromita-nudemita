@@ -29,6 +29,31 @@
   Подробности: docs\INSTALL.md и docs\FAQ.md (русский и китайский).
 
 
+  ENGLISH
+  --------------------------------------------------------------------------
+  What this is
+      One self-contained BepInEx plugin: it reads the mod's pack itself and
+      finishes it. No other model plugin is needed.
+
+  What you need
+      1. BepInEx 6.0.0-be.788 or newer, already installed in the game.
+      2. The nude mod pack - download it here:
+             https://www.nexusmods.com/miside/mods/58
+         Put the downloaded file into
+             <game>\BepInEx\plugins\
+         THE FILE NAME DOES NOT MATTER - the plugin finds it by itself.
+
+  Install
+      1. Extract this archive into the game folder (the one with NeuroMita.exe).
+      2. Run install.bat
+      3. Launch the game.
+
+  No administrator rights are needed. No game file is modified. The pack can be
+  added after the first launch too: the plugin looks for it every few seconds,
+  so the game does not need restarting.
+
+  If something is wrong, look at BepInEx\LogOutput.log for lines marked
+  [Nude]. Details: docs\INSTALL.md and docs\FAQ.md (Russian, English, Chinese).
   中文
   --------------------------------------------------------------------------
   这是什么
